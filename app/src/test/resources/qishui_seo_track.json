@@ -1,0 +1,37 @@
+{
+  "status_code": 0,
+  "track_player": {
+    "url_player_info": "https://player.test/info?track=1",
+    "video_model": ""
+  },
+  "seo_track": {
+    "track": {
+      "id": "7159634662997968910",
+      "name": "DISCO 迪斯科 的士高 复古BGM",
+      "duration": 195000,
+      "artists": [
+        {
+          "name": "测试歌手"
+        }
+      ],
+      "album": {
+        "id": "a1",
+        "name": "测试专辑",
+        "url_cover": {
+          "urls": [
+            "https://p3-luna.douyinpic.com/img/",
+            "https://p6-luna.douyinpic.com/img/"
+          ],
+          "uri": "test-uri",
+          "template_prefix": "test-tpl"
+        }
+      },
+      "audio_info": {
+        "play_info_list": []
+      }
+    },
+    "lyric": {
+      "content": ""
+    }
+  }
+}
