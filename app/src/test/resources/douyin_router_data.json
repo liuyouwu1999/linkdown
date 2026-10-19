@@ -1,0 +1,19 @@
+{
+  "loaderData": {
+    "video_layout": null,
+    "video_(id)/page": {
+      "videoInfoRes": {
+        "item_list": [{
+          "desc": "测试视频标题",
+          "author": {"nickname": "测试博主"},
+          "video": {
+            "play_addr": {"uri": "v0d00fg10000test", "url_list":
+              ["https://www.douyin.com/aweme/v1/play/?video_id=v0d00fg10000test&ratio=720p&line=0&playwm=1"]},
+            "cover": {"url_list": ["https://p3-sign.douyinpic.com/test-cover.jpeg"]},
+            "duration": 12345
+          }
+        }]
+      }
+    }
+  }
+}
