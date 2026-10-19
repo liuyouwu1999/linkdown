@@ -1,0 +1,17 @@
+{
+  "loaderData": {
+    "video_layout": null,
+    "video_(id)/page": {
+      "videoInfoRes": {
+        "item_list": [{
+          "desc": "已删除的视频",
+          "author": {"nickname": "测试博主"},
+          "video": {
+            "play_addr": {"uri": "", "url_list": []},
+            "duration": 1000
+          }
+        }]
+      }
+    }
+  }
+}
