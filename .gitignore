@@ -1,0 +1,11 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+app/src/main/jniLibs/x86_64/
+keystore/
+KEYS.md
+.DS_Store
+*.hprof
+*.zip
