@@ -1,0 +1,14 @@
+{
+  "_type": "playlist",
+  "extractor_key": "BiliBiliSpace",
+  "id": "9469742",
+  "title": "测试UP主的视频合集",
+  "webpage_url": "https://space.bilibili.com/9469742/video",
+  "entries": [
+    {"_type": "url", "id": "BV1GJ411x7h7", "title": "相对 url 走 id 基构造（非数字→video）", "url": "BV1GJ411x7h7", "ie_key": "BiliBili"},
+    {"_type": "url", "id": "1008", "title": "番剧 flat entry 数字 id→ep 构造", "url": "1008", "ie_key": "BiliBili"},
+    null,
+    {"_type": "url", "id": "", "title": "无 id entry 应跳过", "url": ""},
+    {"_type": "url", "id": "BV1zu411m7Yb", "title": "绝对 http url 原样直用", "url": "https://www.bilibili.com/video/BV1zu411m7Yb?p=1", "ie_key": "BiliBili"}
+  ]
+}
