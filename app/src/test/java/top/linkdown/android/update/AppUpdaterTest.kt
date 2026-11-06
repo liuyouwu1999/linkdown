@@ -60,15 +60,26 @@ class AppUpdaterTest {
     @Test fun `latestJson 正常解析与缺字段容错`() {
         val ok = AppUpdater.parseLatestJson("""{"versionName":"1.0.1","notes":"修复若干"}""")
         assertEquals("1.0.1", ok?.versionName)
-        assertEquals("修复若干", ok?.notes)
+        assertEquals("旧版字符串 notes 兼容为单条", listOf("修复若干"), ok?.notes)
 
         val noNotes = AppUpdater.parseLatestJson("""{"versionName":"1.1.0"}""")
         assertEquals("1.1.0", noNotes?.versionName)
-        assertEquals("", noNotes?.notes)
+        assertEquals(emptyList<String>(), noNotes?.notes)
 
         assertNull(AppUpdater.parseLatestJson("""{"notes":"缺版本号"}"""))
         assertNull(AppUpdater.parseLatestJson("not json at all"))
         assertNull(AppUpdater.parseLatestJson(""""裸字符串""""))
+    }
+
+    @Test fun `latestJson 数组 notes 每条一个更新点 空白项过滤`() {
+        val r = AppUpdater.parseLatestJson(
+            """{"versionName":"1.0.2","notes":["抖音图文帖支持，弹窗按内容自适应","修复实况图只下静图","  "]}""",
+        )
+        assertEquals(
+            "数组形态逐条保留、空白项过滤",
+            listOf("抖音图文帖支持，弹窗按内容自适应", "修复实况图只下静图"),
+            r?.notes,
+        )
     }
 
  // ---- 源级联：检查/下载按序逐个试，任一成功即止（用户零选择） ----

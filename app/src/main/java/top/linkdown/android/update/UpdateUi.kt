@@ -2,6 +2,7 @@ package top.linkdown.android.update
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,15 +61,31 @@ fun UpdateOfferDialog(
                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
- // notes 来自 GitHub latest.json 自由文本，长度不受控：限高内滚动，防超长把按钮顶出屏幕（评审 P1）
-            Text(
-                release.notes.ifBlank { "修复与改进" },
-                color = c.textSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+ // 更新说明（呈现对齐 NovaX：多条 1、2、3 编号逐条，单条整段；数据源仍是固定名 latest.json
+ // 直链不走 GitHub API——绕 API 限频/不可达是 v1.0.0.2 拍板架构）。notes 自由文本长度不受控：
+ // 限高内滚动，防超长把按钮顶出屏幕（评审 P1）
+            val notesLines = release.notes.ifEmpty { listOf("修复与改进") }
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 320.dp)
                     .verticalScroll(rememberScrollState()),
-            )
+            ) {
+                if (notesLines.size == 1) {
+                    Text(
+                        notesLines[0],
+                        color = c.textSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                    )
+                } else {
+                    notesLines.forEachIndexed { i, line ->
+                        Text(
+                            "${i + 1}. $line",
+                            color = c.textSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+            }
             if (neverRemindOption) {
                 Spacer(Modifier.height(9.dp))
                 PixelCheckRow("不再提醒", Sprites.NOTE, "", neverRemind) { neverRemind = !neverRemind }

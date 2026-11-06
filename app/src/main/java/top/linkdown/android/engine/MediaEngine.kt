@@ -44,6 +44,8 @@ data class ProbeInfo(
     val isVip: Boolean,
     val playUrl: String?,    // 仅原生直链引擎消费（yt-dlp 平台恒 null）
     val hasImages: Boolean,
+    val liveUrls: List<String> = emptyList(), // 图文实况（ 有什么下什么 ）：与 playUrl 图片一一对应，
+    // 非空=该张实况的视频流（DouyinEngine 图文消费）；空表/空串=静图。默认空表=其余引擎零影响
 )
 
 enum class Mode { VIDEO, AUDIO, COVER }

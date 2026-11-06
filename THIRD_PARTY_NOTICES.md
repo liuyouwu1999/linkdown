@@ -28,6 +28,13 @@
 - License: SIL Open Font License 1.1
 - 作者: TakWolf — https://github.com/TakWolf/fusion-pixel-font
 
+## 抖音签名算法：DouyinSign（自 TikTokDownloader 移植）
+
+- 项目: JoeanAmier/TikTokDownloader（src/encrypt/aBogus.py、websign.py、sm3.py），
+  原始逆向出自 Evil0ctal/Douyin_TikTok_Download_API（src/dtk/signing/native/）
+- 用途: 抖音网页 detail 接口的 a_bogus / x-secsdk-web-signature 双签名（实况图登录态通道）
+- License: Apache License 2.0（Portions Copyright (c) Evil0ctal；Portions Copyright (c) JoeanAmier）
+
 ## Android / Kotlin 生态库
 
 - Jetpack Compose、AndroidX DataStore、kotlinx-serialization-json、OkHttp、

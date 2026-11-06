@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import top.linkdown.android.cookies.CookieStore
+import top.linkdown.android.engine.DouyinEngine
 import top.linkdown.android.cookies.NetscapeCookieFile
 import top.linkdown.android.ui.PixelButton
 import top.linkdown.android.ui.PixelButtonStyle
@@ -94,10 +95,11 @@ class CookieLoginActivity : ComponentActivity() {
         const val EXTRA_PLATFORM = "platform"
         const val PLATFORM_BILIBILI = "bilibili"
         const val PLATFORM_NETEASE = "netease"
+        const val PLATFORM_DOUYIN = "douyin"
     }
 }
 
-/** 各平台登录差异（fix round 2：B站 + 网易云） */
+/** 各平台登录差异（fix round 2：B站 + 网易云； 实况图：抖音） */
 internal data class LoginCfg(
     val platform: String,
     val signText: String,   // 招牌文案
@@ -105,6 +107,7 @@ internal data class LoginCfg(
     val cookieUrl: String,  // 从该 URL 的域抓 CookieManager
     val marker: String,     // 判定「已登录」的 Cookie 名
     val domain: String,     // Netscape 行 domain（yt-dlp 可识别）
+    val desktopUa: Boolean = false, // 抖音桌面页在 WebView 手机 UA 下白屏——桌面 UA 渲染
 )
 
 internal fun loginCfgFor(platform: String): LoginCfg = when (platform) {
@@ -115,6 +118,15 @@ internal fun loginCfgFor(platform: String): LoginCfg = when (platform) {
         cookieUrl = "https://music.163.com",
         marker = "MUSIC_U",
         domain = ".music.163.com",
+    )
+    CookieLoginActivity.PLATFORM_DOUYIN -> LoginCfg(
+        platform = CookieLoginActivity.PLATFORM_DOUYIN,
+        signText = "抖音登录",
+        loginUrl = "https://www.douyin.com/?recommend=1",
+        cookieUrl = "https://www.douyin.com",
+        marker = "sessionid",   // HttpOnly——CookieManager.getCookie 可读（ 实况签名接口登录态 ）
+        domain = ".douyin.com",
+        desktopUa = true,
     )
     else -> LoginCfg(
         platform = CookieLoginActivity.PLATFORM_BILIBILI,
@@ -177,10 +189,35 @@ private fun LoginScreen(cfg: LoginCfg, onGrab: () -> Unit, onAutoGrab: () -> Uni
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true   // 登录流程（密码/短信/滑块）依赖 localStorage
+                    if (cfg.desktopUa) {
+                        // 抖音桌面页在 WebView 默认手机 UA 下白屏——按桌面 Chrome UA 渲染（桌面页含扫码/验证码登录）
+                        settings.userAgentString = DouyinEngine.UA_SIGN
+                        // 桌面版式比手机屏宽：总览缩放让整页适配屏宽，登录按钮可点；支持双指放大看二维码
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        settings.setSupportZoom(true)
+                        settings.builtInZoomControls = true
+                        settings.displayZoomControls = false
+                    }
  // 不设 WebViewClient 时页面跳转默认甩给外部浏览器，登录态落不到本进程 CookieManager
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String) {
+                            android.util.Log.i("CookieLogin", "onPageFinished url=$url")
                             onAutoGrab()
+                        }
+
+                        override fun onReceivedError(view: WebView, req: android.webkit.WebResourceRequest, err: android.webkit.WebResourceError) {
+                            android.util.Log.w("CookieLogin", "onReceivedError ${req.url} code=${err.errorCode} ${err.description}")
+                        }
+
+                        override fun onReceivedHttpError(view: WebView, req: android.webkit.WebResourceRequest, resp: android.webkit.WebResourceResponse) {
+                            android.util.Log.w("CookieLogin", "onReceivedHttpError ${req.url} code=${resp.statusCode}")
+                        }
+                    }
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+                            android.util.Log.i("CookieLogin", "console[${message.messageLevel()}] ${message.message().take(200)}")
+                            return true
                         }
                     }
                     loadUrl(cfg.loginUrl)

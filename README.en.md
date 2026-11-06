@@ -33,7 +33,7 @@ Ordering:
 - Choose what you want before downloading: video (mp4) / audio only (mp3·m4a) / cover (jpg), any combination
 - Also accepts pasted links on the main screen; common short-link forms are expanded automatically
 - Batch multiple links in one paste: each link is detected automatically and listed in the dialog (playlists show their item count); pick what you want and download them all
-- Image posts detected automatically (Douyin/RedNote/Telegram): the dialog offers "images · N + cover (first image)" — download what's actually there; video posts keep the usual video/audio/cover options
+- Image posts detected automatically (Douyin/RedNote/Telegram): the dialog offers "images · N + cover (first image)" — download what's actually there; Douyin Live Photos are saved in full (still image + motion clip, as a pair; sign in to Douyin under Settings → Accounts; RedNote/Telegram image posts are stills); video posts keep the usual video/audio/cover options
 - The input clears itself after ordering; copy a new link, come back, and tap the clipboard chip to bring it in
 
 Queue:
@@ -123,6 +123,7 @@ The software only provides link resolution and file download capabilities; it do
 | [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) | platform API JSON | Apache-2.0 |
 | Jetpack Compose, DataStore, Lifecycle and other AndroidX libraries | UI and storage | Apache-2.0 |
 | [fusion-pixel-font](https://github.com/TakWolf/fusion-pixel-font) | pixel UI font | SIL OFL 1.1 |
+| [TikTokDownloader](https://github.com/JoeanAmier/TikTokDownloader) (Douyin signing ported from it; original reverse engineering from [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)) | Douyin live-photo signing channel | Apache-2.0 |
 
 All components are copyright their respective authors; thanks to the open-source community.
 

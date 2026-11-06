@@ -82,14 +82,25 @@ object AppUpdater {
 
  // ---- 检查 ----
 
-    data class LatestRelease(val versionName: String, val notes: String)
+    data class LatestRelease(val versionName: String, val notes: List<String>)
 
- /** latest.json 解析（纯函数，JVM 直测）：字段缺失/非 JSON → null。 */
+ /** latest.json 解析（纯函数，JVM 直测）：字段缺失/非 JSON → null。
+ * notes 双形态（ 有什么下什么 同拍 NovaX 更新说明分条 ）：数组=每条一个更新点（v1.0.0.7 起新约定，
+ * 弹窗 1、2、3 编号展示）；字符串=旧版自由文本（已发历史 latest.json 兼容，整段单行展示）。 */
     fun parseLatestJson(text: String): LatestRelease? = runCatching {
         val obj = json.parseToJsonElement(text).jsonObject
+        val notes = when (val n = obj["notes"]) {
+            is kotlinx.serialization.json.JsonArray ->
+                n.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                    .map { it.trim() }.filter { it.isNotEmpty() }
+            is kotlinx.serialization.json.JsonPrimitive -> listOfNotNull(
+                n.content.trim().takeIf { it.isNotEmpty() },
+            )
+            else -> emptyList()
+        }
         LatestRelease(
             versionName = obj["versionName"]?.jsonPrimitive?.content?.trim() ?: return null,
-            notes = obj["notes"]?.jsonPrimitive?.content.orEmpty(),
+            notes = notes,
         )
     }.getOrNull()
 

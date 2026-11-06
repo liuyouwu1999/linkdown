@@ -1,0 +1,20 @@
+{
+  "loaderData": {
+    "video_layout": null,
+    "video_(id)/page": {
+      "videoInfoRes": {
+        "item_list": [{
+          "desc": "测试实况标题",
+          "author": {"nickname": "测试博主"},
+          "images": [
+            {
+              "url_list": ["https://p3-sign.douyinpic.com/test-img1.jpeg"],
+              "video": {"play_addr": {"url_list": ["https://p3-sign.douyinpic.com/test-live1.mp4"]}}
+            },
+            {"url_list": ["https://p3-sign.douyinpic.com/test-img2.jpeg"]}
+          ]
+        }]
+      }
+    }
+  }
+}

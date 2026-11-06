@@ -33,7 +33,7 @@ Android 本地视频/音频下载工具。粘贴分享链接，勾选要什么�
 - 弹窗勾选要什么：视频 mp4 / 仅音频 mp3·m4a / 封面 jpg，任意组合，选完才开始
 - 主界面也能粘贴链接下单，B 站短链（b23.tv）等常见分享形态自动展开
 - 一次粘贴多条链接：自动逐条识别，弹窗列出每条（合集自动解析出条数），勾选后整批排队下载
-- 图文帖自动识别（抖音/小红书/Telegram）：弹窗直接给「图片 · N 张 + 封面（首图）」，有什么下什么；视频帖照旧勾视频/音频/封面
+- 图文帖自动识别（抖音/小红书/Telegram）：弹窗直接给「图片 · N 张 + 封面（首图）」，有什么下什么；抖音实况图连动态一起保存（静图+实况视频成对，需在设置「登录账号」里登录抖音；小红书/Telegram 图文为静图）；视频帖照旧勾视频/音频/封面
 - 下单后输入框自动清空；复制新链接切回应用，点「剪贴板有一条」提示条一键带入
 
 队列：
@@ -123,6 +123,8 @@ release 构建需自行配置签名（见 `app/build.gradle.kts` 内注释）；
 | [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) | 平台接口 JSON 解析 | Apache-2.0 |
 | Jetpack Compose、DataStore、Lifecycle 及 AndroidX 组件 | UI 与存储基础 | Apache-2.0 |
 | [fusion-pixel-font](https://github.com/TakWolf/fusion-pixel-font) | 界面像素字体 | SIL OFL 1.1 |
+| [TikTokDownloader](https://github.com/JoeanAmier/TikTokDownloader)（抖音签名算法自其移植，原逆向出自 [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)） | 抖音实况签名通道 | Apache-2.0 |
+| [TikTokDownloader](https://github.com/JoeanAmier/TikTokDownloader)（抖音签名算法自其移植，原逆向出自 [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)） | 抖音实况签名通道 | Apache-2.0 |
 
 以上组件的版权归各自作者所有，感谢开源社区。
 

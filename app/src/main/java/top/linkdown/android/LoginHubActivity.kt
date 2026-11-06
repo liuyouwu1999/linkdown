@@ -66,11 +66,16 @@ class LoginHubActivity : ComponentActivity() {
     }
 }
 
-/** 折叠区/选择页共用的平台清单（顺序即展示顺序） */
-internal val LOGIN_PLATFORMS = listOf(CookieLoginActivity.PLATFORM_BILIBILI, CookieLoginActivity.PLATFORM_NETEASE)
+/** 折叠区/选择页共用的平台清单（顺序即展示顺序； 实况图：抖音入列） */
+internal val LOGIN_PLATFORMS = listOf(
+    CookieLoginActivity.PLATFORM_BILIBILI,
+    CookieLoginActivity.PLATFORM_NETEASE,
+    CookieLoginActivity.PLATFORM_DOUYIN,
+)
 
 internal fun platformDisplayName(platform: String): String = when (platform) {
     CookieLoginActivity.PLATFORM_NETEASE -> "网易云"
+    CookieLoginActivity.PLATFORM_DOUYIN -> "抖音"
     else -> "B站"
 }
 

@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.SerializationException
@@ -11,7 +12,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import top.linkdown.android.cookies.NetscapeCookieFile
 import top.linkdown.android.engine.internal.FfmpegPost
+import top.linkdown.android.engine.internal.douyinSignDetailQuery
 import top.linkdown.android.engine.internal.safeFilename
 import top.linkdown.android.pipeline.PlatformDirs
 import java.io.File
@@ -25,13 +28,15 @@ import java.util.concurrent.TimeUnit
 /**
  * 抖音引擎（设计；参考实现 linkdown/resolvers/douyin.py 逐字平移）。
  * iesdouyin share 页 _ROUTER_DATA 自解析；ttwid 每次现取不缓存（参考实现 同语义，无过期管理）。
- * 构造注入缝：两 host 分参（单测换 MockWebServer），生产默认值在 [production]/伴生常量。
- * cookies 参数按 设计忽略（仅 YtdlpEngine 消费）。
+ * 构造注入缝：三 host 分参（单测换 MockWebServer），生产默认值在 [production]/伴生常量。
+ * cookies 参数：douyin.txt（登录中心 WebView 登录写入）——图文帖据此走签名 detail 接口
+ * 提取实况流（ 有什么下什么 ）；无 cookie → 静图降级（share 页匿名数据本就无实况流）。
  */
 class DouyinEngine(
     private val ttwidBaseUrl: String,
     private val shareBaseUrl: String,
     ffmpegPath: String,
+    private val detailBaseUrl: String = PROD_DETAIL_BASE_URL,
 ) : MediaEngine {
 
     private val post = FfmpegPost(ffmpegPath)
@@ -72,23 +77,35 @@ class DouyinEngine(
  // 图文/图集分支（「有什么下什么」，参考实现 douyin.py 无此分支）：item 含 images → 按图文交付。
  // ⚠️不能只看 play_addr 是否为空：实测图文帖常带合成占位 play_addr（落盘非有效视频，
  // ffmpeg 报 moov atom not found）。形态照 XhsEngine 图文：图片直链「;」并入 playUrl、首图兜底封面。
- // 有意取舍：实况照片类混合帖（真视频流+images 并存）也按图文交付，视频流不取——
- // images 是帖子主体，避免同一帖两套产物语义。
-        val imageUrls = (item["images"] as? JsonArray).orEmpty().mapNotNull { e ->
-            imageDirectUrl(((e as? JsonObject)?.get("url_list") as? JsonArray).orEmpty())
+ // 实况图（ 有什么下什么 ）：单张 image 节点内嵌 video.play_addr.url_list=该张实况的视频流
+ // （parse-video-py live_photo 同款键位，url_list[0] 原样直链无需 playwm 替换）——逐张提取与图片
+ // **成对**构建（mapNotNull 丢元素会导致两列表错位，故同源单遍映射）随 ProbeInfo.liveUrls 带回，
+ // 交付时静图+实况成对；混合帖静图张只出静图。
+        val imagePairs = (item["images"] as? JsonArray).orEmpty().mapNotNull { e ->
+            val direct = imageDirectUrl(((e as? JsonObject)?.get("url_list") as? JsonArray).orEmpty())
+                ?: return@mapNotNull null
+            direct to liveVideoUrl(e)
         }
-        if (imageUrls.isNotEmpty()) {
+        if (imagePairs.isNotEmpty()) {
+ // 实况流真源=登录态签名 detail 接口（share 页匿名数据被抖音降级、无实况字段）；
+ // 无 cookie/请求失败 → 静图降级（不阻断 probe）
+            val detailLiveUrls = cookies?.takeIf { it.exists() }
+                ?.let { runCatching { fetchLiveUrlsViaDetail(vid, it) }.getOrNull() }
+                ?: emptyList()
+            val liveUrls = if (detailLiveUrls.size == imagePairs.size) detailLiveUrls
+            else imagePairs.map { it.second }
             return ProbeInfo(
                 platform = PlatformDirs.DOUYIN,
                 mediaId = vid,
                 sourceUrl = url,
                 title = title,
                 author = author,
-                coverUrl = videoCover?.takeIf { it.isNotEmpty() } ?: imageUrls.first(),
+                coverUrl = videoCover?.takeIf { it.isNotEmpty() } ?: imagePairs.first().first,
                 durationSec = null, // 图文无时长
                 isVip = false,
-                playUrl = imageUrls.joinToString(";"),
+                playUrl = imagePairs.joinToString(";") { it.first },
                 hasImages = true,
+                liveUrls = liveUrls,
             )
         }
  // ≙参考实现 ((video.get("play_addr") or {}).get("url_list") or [""])[0].replace("playwm", "play")
@@ -199,7 +216,8 @@ class DouyinEngine(
         }
     }
 
- /** 图文流：多图逐张下载（title-1/2/3.jpg…，≙XhsEngine.imagesFlow 图文形态）。 */
+ /** 图文流：多图逐张下载（title-1/2/3.jpg…，≙XhsEngine.imagesFlow 图文形态）；
+ * 实况图（ 有什么下什么 ）：liveUrls[i] 非空的张连实况视频流一起下（title-N-实况.mp4 成对落架）。 */
     private fun imagesFlow(info: ProbeInfo, taskDir: Path,
                            onProgress: (Float, String) -> Unit,
                            isCancelled: () -> Boolean): List<Path> {
@@ -212,9 +230,73 @@ class DouyinEngine(
             val final = taskDir.resolve(safeFilename("${info.title}-${i + 1}") + ".jpg")
             Files.move(raw, final, StandardCopyOption.REPLACE_EXISTING)
             products.add(final) // Path 实现了 Iterable，+= 有重载歧义，须显式 add（XhsEngine 同款）
+            info.liveUrls.getOrNull(i)?.takeIf { it.isNotBlank() }?.let { live ->
+                val liveRaw = taskDir.resolve("live-$i")
+                streamToFile(live, liveRaw, onProgress, isCancelled)
+                val liveFinal = taskDir.resolve(safeFilename("${info.title}-${i + 1}-实况") + ".mp4")
+                Files.move(liveRaw, liveFinal, StandardCopyOption.REPLACE_EXISTING)
+                products.add(liveFinal)
+            }
         }
         onProgress(1.0f, DOWNLOAD_DONE_LABEL)
         return products
+    }
+
+ /**
+ * 签名 detail 接口取实况流（ 实况图有什么下什么 ，真机实测配方）：
+ * 登录 cookie（douyin.txt，含 sessionid+UIFID）+ a_bogus/websign 双签名（DouyinSign）。
+ * 返回与图片同序的实况直链列表；任何失败 → 空表（静图降级，不阻断 probe）。
+ */
+    private fun fetchLiveUrlsViaDetail(vid: String, cookieFile: File): List<String> {
+        val entries = NetscapeCookieFile.parse(cookieFile.readText())
+            .filter { it.name.isNotEmpty() && it.value.isNotEmpty() }
+        val header = entries.joinToString("; ") { "${it.name}=${it.value}" }
+        val uifid = entries.firstOrNull { it.name.equals("UIFID", ignoreCase = true) }?.value.orEmpty()
+        val hasSession = entries.any { it.name.equals("sessionid", ignoreCase = true) }
+        if (uifid.isEmpty() || !hasSession) return emptyList() // 未登录：detail 只回匿名空数据
+        val params = linkedMapOf(
+            "device_platform" to "webapp", "aid" to "6383", "channel" to "channel_pc_web",
+            "update_version_code" to "170400", "pc_client_type" to "1", "pc_libra_divert" to "Mac",
+            "support_h265" to "1", "support_dash" to "1", "version_code" to "290100",
+            "version_name" to "29.1.0", "cookie_enabled" to "true", "screen_width" to "1536",
+            "screen_height" to "864", "browser_language" to "zh-CN", "browser_platform" to "MacIntel",
+            "browser_name" to "Chrome", "browser_version" to "146.0.0.0", "browser_online" to "true",
+            "engine_name" to "Blink", "engine_version" to "146.0.0.0", "os_name" to "Mac OS",
+            "os_version" to "10.15.7", "cpu_core_num" to "16", "device_memory" to "8",
+            "platform" to "PC", "downlink" to "10", "effective_type" to "4g",
+            "round_trip_time" to "200", "uifid" to uifid, "aweme_id" to vid,
+            "msToken" to randomMsToken(),
+        )
+        val query = params.entries.joinToString("&") { "${it.key}=${it.value}" }
+        val nowMs = System.currentTimeMillis()
+        val finalQuery = douyinSignDetailQuery(query, uifid, UA_SIGN, seed = nowMs, nowMs = nowMs)
+        val request = Request.Builder()
+            .url("$detailBaseUrl/aweme/v1/web/aweme/detail/?$finalQuery")
+            .header("User-Agent", UA_SIGN)
+            .header("Referer", "https://www.douyin.com/?recommend=1")
+            .header("Cookie", header)
+            .header("Accept", "application/json, text/plain, */*")
+            .build()
+        probeClient.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return emptyList()
+            val body = resp.body?.string() ?: return emptyList()
+            val detail = (Json.parseToJsonElement(body).jsonObject["aweme_detail"] as? JsonObject)
+                ?: return emptyList()
+            val imgs = (detail["images"] as? JsonArray) ?: return emptyList()
+            return imgs.mapNotNull { e ->
+                val imgObj = e as? JsonObject ?: return@mapNotNull null
+                val urls = (((imgObj["video"] as? JsonObject)?.get("play_addr") as? JsonObject)
+                    ?.get("url_list")) as? JsonArray ?: return@mapNotNull null
+                urls.asSequence()
+                    .mapNotNull { p -> (p as? JsonPrimitive)?.takeIf { q -> q !is JsonNull }?.content }
+                    .firstOrNull { it.isNotBlank() }
+            }
+        }
+    }
+
+    private fun randomMsToken(): String {
+        val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        return (1..116).map { alphabet.random() }.joinToString("")
     }
 
     private fun requirePlayUrl(info: ProbeInfo): String =
@@ -233,6 +315,15 @@ class DouyinEngine(
             ?: return null
         return if (picked.startsWith("//")) "https:$picked" else picked
     }
+
+ /** 单张实况视频流直链：image.video.play_addr.url_list 首条非空（无=静图，返回空串）。 */
+    private fun liveVideoUrl(e: JsonElement): String =
+        (((e as? JsonObject)?.get("video") as? JsonObject)?.get("play_addr") as? JsonObject)
+            ?.get("url_list")?.let { list ->
+                (list as? JsonArray)?.asSequence()
+                    ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p !is JsonNull }?.content }
+                    ?.firstOrNull { it.isNotBlank() }
+            }.orEmpty()
 
  /** 参考实现 下载循环：UA=PC + Referer www.douyin.com；raise_for_status；64KB 分块流式 +
  * Content-Length 已知时 MB 进度（f"{done/1e6:.1f}/{total/1e6:.1f} MB"）；逐块查取消。 */
@@ -281,6 +372,11 @@ class DouyinEngine(
     companion object {
         const val PROD_TTWID_URL = "https://ttwid.bytedance.com/ttwid/union/register/"
         const val PROD_SHARE_BASE_URL = "https://www.iesdouyin.com"
+        const val PROD_DETAIL_BASE_URL = "https://www.douyin.com"
+
+        /** detail 签名请求的固定 UA（与签名摘要链一致；Chrome146 实测配方，UA≠设备真实身份）。CookieLoginActivity 抖音 WebView 同 UA 复用 */
+        internal val UA_SIGN =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 
  /** 生产入口：默认双 host（ffmpeg 路径来自 FfmpegLocator）。 */
         fun production(ffmpegPath: String) = DouyinEngine(PROD_TTWID_URL, PROD_SHARE_BASE_URL, ffmpegPath)

@@ -42,6 +42,19 @@ class DouyinEngineTest {
         val COVER_BYTES = byteArrayOf(1, 2, 3, 4, 5)
         val IMAGE1_BYTES = byteArrayOf(11, 22, 33) // 图文第 1 张（内容可辨，断言逐张不串）
         val IMAGE2_BYTES = byteArrayOf(44, 55, 66, 77) // 图文第 2 张
+        val LIVE_BYTES = byteArrayOf(9, 8, 7, 6, 5) // 实况图动态流（与静图可辨）
+
+        /** 测试用 douyin.txt（登录态：sessionid+UIFID） */
+        fun douyinCookieFile(dir: File): File {
+            val f = File(dir, "cookies/douyin.txt")
+            f.parentFile.mkdirs()
+            f.writeText(
+                "# Netscape HTTP Cookie File\n" +
+                    ".douyin.com\tTRUE\t/\tTRUE\t2145916800\tUIFID\ttest-uifid-value\n" +
+                    "#HttpOnly_.douyin.com\tTRUE\t/\tTRUE\t2145916800\tsessionid\ttest-session-value\n",
+            )
+            return f
+        }
     }
 
     private var server: MockWebServer? = null
@@ -91,6 +104,12 @@ class DouyinEngineTest {
                         MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE1_BYTES))
                     path == "/test-img2.jpeg" ->
                         MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE2_BYTES))
+                    path == "/test-live1.mp4" ->
+                        MockResponse().setResponseCode(200).setBody(Buffer().write(LIVE_BYTES))
+                    path == "/test-live2.mp4" ->
+                        MockResponse().setResponseCode(200).setBody(Buffer().write(LIVE_BYTES))
+                    path.startsWith("/aweme/v1/web/aweme/detail/") ->
+                        MockResponse().setResponseCode(200).setBody(fixtureText("douyin_detail_live.json"))
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -123,6 +142,7 @@ class DouyinEngineTest {
             ttwidBaseUrl = server!!.url("/ttwid/union/register/").toString(),
             shareBaseUrl = base(),
             ffmpegPath = sh.absolutePath,
+            detailBaseUrl = base(),
         )
     }
 
@@ -133,6 +153,7 @@ class DouyinEngineTest {
             .readBytes().toString(Charsets.UTF_8)
         return raw.replace("https://www.douyin.com", base())
             .replace("https://p3-sign.douyinpic.com", base())
+            .replace("https://v96-web.douyinvod.com", base())
     }
 
  /** ≙参考实现 mock_api："<script>window._ROUTER_DATA=JSON</script>"；尾部再补一个含 } 的脚本块守卫非贪婪。 */
@@ -277,6 +298,35 @@ class DouyinEngineTest {
         assertEquals("测试图集标题", info.title)
         assertEquals("测试博主", info.author)
         assertEquals("图文无时长", null, info.durationSec)
+        assertEquals("静态图集无实况流", listOf("", ""), info.liveUrls)
+    }
+
+    @Test fun `probe 实况图 混合帖 逐张提取与图片一一对应`() = runBlocking {
+        startServer()
+ // 第 1 张实况（内嵌 video.play_addr）+ 第 2 张静图——liveUrls 与 playUrl 图片严格同长同序
+        shareForFixture("douyin_router_data_live.json")
+        val info = engine().probe(shortUrl(), null)
+        assertTrue(info.hasImages)
+        assertEquals("${base()}/test-img1.jpeg;${base()}/test-img2.jpeg", info.playUrl)
+        assertEquals(listOf("${base()}/test-live1.mp4", ""), info.liveUrls)
+        assertEquals("测试实况标题", info.title)
+    }
+
+    @Test fun `download 实况图 video模式 静图实况成对落架`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_live.json")
+        val e = engine()
+        val info = e.probe(shortUrl(), null)
+        val dir = tmp.newFolder("task-live")
+        val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+        assertEquals(
+            "静图+实况成对、静图张只出静图",
+            listOf("测试实况标题-1.jpg", "测试实况标题-1-实况.mp4", "测试实况标题-2.jpg"),
+            out.map { it.fileName.toString() },
+        )
+        assertTrue("第 1 张静图内容可辨", out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES))
+        assertTrue("实况流内容可辨不串", out[1].toFile().readBytes().contentEquals(LIVE_BYTES))
+        assertTrue("第 2 张静图内容可辨", out[2].toFile().readBytes().contentEquals(IMAGE2_BYTES))
     }
 
     @Test fun `probe 图集带占位play_addr 仍按图文交付 有什么下什么`() = runBlocking {
@@ -444,6 +494,81 @@ class DouyinEngineTest {
         val dir = tmp.newFolder("task-sanitize")
         val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
         assertEquals(listOf("测试视频标题.mp4"), out.map { it.fileName.toString() })
+    }
+
+    // ------------------------------------------------------------------
+    // 实况图签名 detail 通道（ 有什么下什么 ）：douyin.txt 登录态 → 双签名 detail → liveUrls
+    // ------------------------------------------------------------------
+
+    @Test fun `probe 图集带 douyin cookie 签名 detail 提取实况流`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        val cookieFile = douyinCookieFile(tmp.root)
+        val info = engine().probe(shortUrl(), cookieFile)
+        assertTrue(info.hasImages)
+        assertEquals("detail 实况流与图片一一对应", listOf("${base()}/test-live1.mp4", "${base()}/test-live2.mp4"), info.liveUrls)
+        // 签名请求要素：Cookie 头 + uifid + a_bogus + timestamp + x-secsdk-web-signature
+        val detailReq = requestLog.first { it.startsWith("GET /aweme/v1/web/aweme/detail/") }
+        assertTrue("登录 cookie 随请求发送: " + detailReq.take(1300), detailReq.contains("sessionid=test-session-value"))
+        assertTrue(detailReq.contains("UIFID=test-uifid-value"))
+        assertTrue("a_bogus 参数在 query", detailReq.contains("a_bogus="))
+        assertTrue("timestamp 参数在 query", detailReq.contains("timestamp="))
+        assertTrue("x-secsdk-web-signature 参数在 query", detailReq.contains("x-secsdk-web-signature="))
+        assertTrue("签名 UA（Chrome146）", detailReq.contains("Chrome/146.0.0.0"))
+    }
+
+    @Test fun `download 图集带实况 cookie 静图实况成对落架`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        val cookieFile = douyinCookieFile(tmp.root)
+        val e = engine()
+        val info = e.probe(shortUrl(), cookieFile)
+        val dir = tmp.newFolder("task-live-pair")
+        val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+        assertEquals(
+            "静图+实况成对（title-1.jpg/实况.mp4 ×2）",
+            listOf("测试图集标题-1.jpg", "测试图集标题-1-实况.mp4", "测试图集标题-2.jpg", "测试图集标题-2-实况.mp4"),
+            out.map { it.fileName.toString() },
+        )
+        assertTrue("实况流字节可辨", out[1].toFile().readBytes().contentEquals(LIVE_BYTES))
+        assertTrue(out[3].toFile().readBytes().contentEquals(LIVE_BYTES))
+    }
+
+    @Test fun `probe 图集无 cookie 不请求 detail 静图降级`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        val info = engine().probe(shortUrl(), null)
+        assertTrue(info.hasImages)
+        assertEquals("无登录态 → 无实况流（匿名 detail 只有静图）", listOf("", ""), info.liveUrls)
+        assertEquals("detail 接口未被调用", 0, requestLog.count { it.startsWith("GET /aweme/v1/web/aweme/detail/") })
+    }
+
+    @Test fun `probe detail 失败 静图降级不阻断`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        // detail 路由返回 500 → 降级静图
+        val s0 = server!!
+        s0.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                return when {
+                    path.startsWith("/aweme/v1/web/aweme/detail/") -> MockResponse().setResponseCode(500)
+                    path.startsWith("/ttwid/") -> ttwidResponse
+                    path == "/iABC12/" -> MockResponse().setResponseCode(302).setHeader("Location", "/video/$VIDEO_ID")
+                    path == "/video/$VIDEO_ID" -> MockResponse().setResponseCode(200).setBody("ok")
+                    path.startsWith("/share/video/") -> shareResponse(request.getHeader("Cookie"))
+                    path.startsWith("/aweme/v1/play/") -> MockResponse().setResponseCode(200).setBody(Buffer().write(VIDEO_BYTES))
+                    path == "/test-cover.jpeg" -> MockResponse().setResponseCode(200).setBody(Buffer().write(COVER_BYTES))
+                    path.startsWith("/test-img1.jpeg") -> MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE1_BYTES))
+                    path == "/test-img2.jpeg" -> MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE2_BYTES))
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
+        val cookieFile = douyinCookieFile(tmp.root)
+        val info = engine().probe(shortUrl(), cookieFile)
+        assertTrue("detail 挂了 probe 仍成功", info.hasImages)
+        assertEquals("降级为静图（share 页实况字段空）", listOf("", ""), info.liveUrls)
     }
 
     @Test fun `safe_filename 平移断言`() {
