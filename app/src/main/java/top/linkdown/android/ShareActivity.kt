@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.linkdown.android.engine.BatchInfo
+import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.YtdlpEngine
 import top.linkdown.android.pipeline.DownloadModes
 import top.linkdown.android.queue.DownloadQueue
@@ -89,6 +90,7 @@ class ShareActivity : ComponentActivity() {
                 ShareCard(
                     queue = app.queue,
                     enumerate = { u -> app.pipeline.enumerate(u, null) }, // 入口枚举缝（sessdata 恒 null）
+                    probeFor = { u -> app.pipeline.probeFor(u, null) }, // 弹窗预判型缝（ 有什么下什么 ）
                     url = url,
                     onClose = { finish() },
                 )
@@ -104,6 +106,7 @@ class ShareActivity : ComponentActivity() {
 private fun ShareCard(
     queue: DownloadQueue,
     enumerate: suspend (String) -> BatchInfo,
+    probeFor: suspend (String) -> ProbeInfo,
     url: String,
     onClose: () -> Unit,
 ) {
@@ -135,6 +138,7 @@ private fun ShareCard(
             urls = listOf(url),
             initial = DownloadModes(false, false, false),
             enumerate = enumerate,
+            probeFor = probeFor,
             onConfirmSingle = { modes, u, _ ->
                 scope.launch {
                     when (val r = queue.enqueue(u, modes, sessdataSnapshot = null)) {

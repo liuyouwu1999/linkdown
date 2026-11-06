@@ -33,6 +33,7 @@ Ordering:
 - Choose what you want before downloading: video (mp4) / audio only (mp3·m4a) / cover (jpg), any combination
 - Also accepts pasted links on the main screen; common short-link forms are expanded automatically
 - Batch multiple links in one paste: each link is detected automatically and listed in the dialog (playlists show their item count); pick what you want and download them all
+- Image posts detected automatically (Douyin/RedNote/Telegram): the dialog offers "images · N + cover (first image)" — download what's actually there; video posts keep the usual video/audio/cover options
 - The input clears itself after ordering; copy a new link, come back, and tap the clipboard chip to bring it in
 
 Queue:

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.linkdown.android.engine.BatchInfo
+import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.internal.ChildRef
 import top.linkdown.android.pipeline.DownloadModes
 import top.linkdown.android.pipeline.PlatformDirs
@@ -108,6 +109,7 @@ fun MainScreen(
     onStart: (modes: DownloadModes, url: String, probeTitle: String?) -> Unit,
     onEnqueueGroup: (modes: DownloadModes, url: String, title: String, children: List<ChildRef>) -> Unit,
     enumerateBatch: suspend (String) -> BatchInfo,
+    probeFor: suspend (String) -> ProbeInfo,
     onCancel: (String) -> Unit,
     onRetry: (String) -> Unit,
     onDeleteQueueItem: (String) -> Unit,
@@ -233,6 +235,7 @@ fun MainScreen(
             urls = extractOrderUrls(state.url),
             initial = state.modes,
             enumerate = enumerateBatch,
+            probeFor = probeFor,
             onConfirmSingle = { modes, u, probeTitle ->
                 showOrderDialog = false
                 onModeChange(modes)

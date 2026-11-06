@@ -17,6 +17,7 @@ import top.linkdown.android.engine.CancelHandle
 import top.linkdown.android.engine.EngineCancelledException
 import top.linkdown.android.engine.EngineException
 import top.linkdown.android.engine.MediaEngine
+import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.Mode
 import top.linkdown.android.engine.QishuiEngine
 import top.linkdown.android.ingest.MediaStoreIngest
@@ -159,6 +160,17 @@ class SingleDownloadPipeline(
             engine.enumerate(url, env.cookieFile(url, sessdata), runId = UUID.randomUUID().toString())
         }
 
+ /**
+ * 弹窗预判型缝（ 有什么下什么 ）：抖音/小红书/Telegram 单链接开窗先 probe 判图文/视频，
+ * 勾选项随内容自适应（图文→「图片·N 张+封面」）。只读不入队；runId 现取且不注册
+ * EngineRegistry（取消=弹窗关闭丢弃协程结果，enumerate 同语义）。抛错由弹窗捕获回退通用三行。
+ */
+    suspend fun probeFor(url: String, sessdata: String?): ProbeInfo =
+        withContext(Dispatchers.IO) {
+            val engine = env.engineFor(url)
+            engine.probe(url, env.cookieFile(url, sessdata), runId = UUID.randomUUID().toString())
+        }
+
     override suspend fun run(item: QueueItem, hooks: QueueRunHooks) = runItem(item, hooks)
 
  /**
@@ -198,14 +210,25 @@ class SingleDownloadPipeline(
  // 库判重（设计）：probe 后、下载启动前——货架已有产物的模式跳过不重下
  // （逐模式扩展名集合+预测基名前缀比对，判据在 DedupCheck）；跳过模式记日志交代。
  // 判重用 probe 平台（=入库 RELATIVE_PATH 平台目录，与 ingest 同源）。
-            val hits = selected.filter { env.dedup.exists(info.platform, info.title, it, info.author) }
-            val modesToRun = selected.filterNot { it in hits }
+ // 图文/图集（hasImages）没有音频流：「有什么下什么」——勾了的音频跳过并日志交代；
+ // 跳过语义与判重命中同为「不可跑」，故先过滤再判重，统一并入下方 Exists 判定
+ // （审核 P2 修复：图文帖图片已交付/已命中时只剩音频 → Exists 终态而非失败劣化）
+            val impossibleAudio = selected.filter { it == Mode.AUDIO && info.hasImages }
+            impossibleAudio.forEach { hooks.onLog(IMAGE_NO_AUDIO_SKIP_LOG) }
+            val candidates = selected.filterNot { it in impossibleAudio }
+            val hits = candidates.filter { env.dedup.exists(info.platform, info.title, it, info.author) }
+            val modesToRun = candidates.filterNot { it in hits }
             hits.forEach { hooks.onLog("已在货架上，跳过：${modeLabel(it)}") }
             if (selected.isNotEmpty() && modesToRun.isEmpty()) {
- // 全部所选（未完成）模式命中 → Exists 终态（**非异常信号**，设计）：
- // 队列侧 hooksFor.onExists 终态化 Exists（终态表/父组 existsChildren/持久化/续派发）；
- // 信号返回后本管道正常收尾，dispatch 兜底 Completed 因项已出 active 表成 no-op。
- // compat 直跑（hooks 默认空实现）忽略信号照常 Done。
+ // 全部所选（未完成）模式不可跑。两个出口：
+ // ① 只勾音频且货架/历史从无交付 → 人话失败（不静默空成功，设计）
+ // ② 其余（判重命中 / 前次已完成模式已交付）→ Exists 终态（**非异常信号**，设计）：
+ //    队列侧 hooksFor.onExists 终态化 Exists（终态表/父组 existsChildren/持久化/续派发）；
+ //    信号返回后本管道正常收尾，dispatch 兜底 Completed 因项已出 active 表成 no-op。
+ //    compat 直跑（hooks 默认空实现）忽略信号照常 Done。
+                if (hits.isEmpty() && item.completedModes.none { it != Mode.AUDIO }) {
+                    throw EngineException(IMAGE_NO_AUDIO_MESSAGE)
+                }
                 hooks.onExists()
                 taskDir.deleteRecursively() // 无产物下载，临时目录直接清
                 return
@@ -213,7 +236,7 @@ class SingleDownloadPipeline(
             modesToRun.forEachIndexed { index, mode ->
  // probe→download / 模式间间隙取消的同款守卫（评审修复 保留）
                 if (handle.isCancelled()) throw EngineCancelledException(CANCELLED_MESSAGE)
-                val label = modeLabel(mode)
+                val label = if (mode == Mode.VIDEO && info.hasImages) IMAGE_MODE_LABEL else modeLabel(mode)
  // 设计：汽水 video 勾选按音频交付——Running 的 modeLabel 即「音频」；「汽水无视频流，
  // 已按音频交付」日志行折叠后引擎收 AUDIO 不再自报，由管道补发
                 if (engine is QishuiEngine && item.modes.video && mode == Mode.AUDIO) {
@@ -321,3 +344,9 @@ internal fun classifyDownloadFailure(t: Throwable): PipelineState = when (t) {
     is EngineException -> PipelineState.Failed(t.message ?: "下载失败")
     else -> PipelineState.Failed(ErrorMapper.humanize(t))
 }
+
+// 图文/图集模式段文案（ 有什么下什么 ）：音频勾选在 hasImages 时跳过（单勾才报错）；
+// VIDEO 交付的是多图，进度/入库标签如实显示「图片」
+private const val IMAGE_MODE_LABEL = "图片"
+private const val IMAGE_NO_AUDIO_SKIP_LOG = "图文没有音频，已跳过音频"
+private const val IMAGE_NO_AUDIO_MESSAGE = "图文没有音频可提取"

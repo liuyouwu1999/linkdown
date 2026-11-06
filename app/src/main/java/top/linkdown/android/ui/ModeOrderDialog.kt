@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,11 +42,14 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.CancellationException
 import top.linkdown.android.engine.BatchInfo
 import top.linkdown.android.engine.EngineException
+import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.internal.ChildRef
 import top.linkdown.android.engine.internal.expandShortlink
 import top.linkdown.android.engine.internal.isBatchUrl
 import top.linkdown.android.engine.internal.isShortlinkUrl
 import top.linkdown.android.pipeline.DownloadModes
+import top.linkdown.android.pipeline.EngineKind
+import top.linkdown.android.pipeline.EngineRouter
 import top.linkdown.android.pipeline.ErrorMapper
 import top.linkdown.android.queue.MAX_GROUP_CHILDREN
 import kotlinx.coroutines.launch
@@ -132,15 +136,40 @@ internal suspend fun resolveOrderLine(
     }
 }
 
-/** 弹窗阶段：勾选 → 解析加载态 → 批量二段确认 → 枚举抛错人话（按设计）；多链接另有逐条解析/列表确认。 */
-private sealed interface OrderStage {
-    data object Modes : OrderStage
+/** 弹窗阶段：勾选 → 解析加载态 → 批量二段确认 → 枚举抛错人话（按设计）；多链接另有逐条解析/列表确认。
+ * Modes.imageCount 非 null = 开窗预判型判得图文（勾选行随内容自适应）；Sniffing = 预判型进行中。
+ * internal：[initialOrderStage] 签名暴露（JVM 直测经 ::class/toString 断言）。 */
+internal sealed interface OrderStage {
+    data class Modes(val imageCount: Int?) : OrderStage
+    data object Sniffing : OrderStage
     data object Parsing : OrderStage
     data class Confirm(val info: BatchInfo) : OrderStage
     data class MultiParsing(val done: Int, val total: Int) : OrderStage
     data class MultiConfirm(val lines: List<OrderLine>) : OrderStage
     data class Error(val message: String) : OrderStage
 }
+
+/**
+ * 图文能力引擎（ 有什么下什么 ）：抖音/小红书/Telegram 单链接开窗先 probe 判图文/视频，
+ * 勾选项自适应（图文→「图片·N 张+封面」，无音频行）；判型失败回退通用三行（引擎侧守卫兜底）。
+ * 微博恒无图文、yt-dlp/汽水判型慢且恒无图文——都不预判（B 站等保持弹窗秒开）。
+ * top-level internal：JVM 直测（routeFor 纯函数）。
+ */
+internal val IMAGE_CAPABLE_KINDS = setOf(EngineKind.DOUYIN, EngineKind.XHS, EngineKind.TELEGRAM)
+
+internal fun isImageCapableUrl(url: String): Boolean = EngineRouter.routeFor(url) in IMAGE_CAPABLE_KINDS
+
+/** 开窗初始阶段：图文能力单链接先进 Sniffing（判型完成落 Modes(imageCount)），其余直接通用勾选。 */
+internal fun initialOrderStage(single: String?): OrderStage = when {
+    single != null && isImageCapableUrl(single) -> OrderStage.Sniffing
+    else -> OrderStage.Modes(null)
+}
+
+/** probe 结果 → 图文张数（hasImages 且 playUrl「;」并直链非空）；视频帖/异常 → null=通用三行。 */
+internal fun imageCountOf(info: ProbeInfo): Int? =
+    info.takeIf { it.hasImages }?.playUrl
+        ?.split(";")?.count { it.isNotBlank() }
+        ?.takeIf { it > 0 }
 
 /**
  * 勾选弹窗（功能任务 提取为 internal 共享； 批量二段确认）：主页「下 单！」与
@@ -156,6 +185,7 @@ internal fun ModeOrderDialog(
     urls: List<String>,
     initial: DownloadModes,
     enumerate: suspend (String) -> BatchInfo,
+    probeFor: suspend (String) -> ProbeInfo,
     onConfirmSingle: (modes: DownloadModes, url: String, probeTitle: String?) -> Unit,
     onConfirmBatch: (modes: DownloadModes, url: String, title: String, children: List<ChildRef>) -> Unit,
     onConfirmMulti: (modes: DownloadModes, singles: List<MultiSingleOrder>, groups: List<MultiGroupOrder>) -> Unit,
@@ -164,9 +194,26 @@ internal fun ModeOrderDialog(
     val c = PixelTheme.colors
     val single = urls.singleOrNull()   // 单链接路径维持原行为；多链接走 Multi* 阶段
     var sel by remember { mutableStateOf(initial) }
-    var stage by remember { mutableStateOf<OrderStage>(OrderStage.Modes) }
+    var stage by remember { mutableStateOf<OrderStage>(initialOrderStage(single)) }
     var multiPicked by remember { mutableStateOf(emptySet<Int>()) }
     val scope = rememberCoroutineScope()
+
+ // 开窗预判型（ 有什么下什么 ）：图文能力引擎单链接先 probe（重定向+ttwid+share 页等数次快 HTTP，
+ // 境外不可达域名等满连接超时后回退通用三行），判得图文 →
+ // 勾选行自适应为「图片·N 张+封面」并清掉 remembered 音频勾选；视频帖/判型失败 → 通用三行原样
+    LaunchedEffect(single) {
+        if (single != null && stage is OrderStage.Sniffing) {
+            val imageCount = try {
+                imageCountOf(probeFor(single))
+            } catch (ce: CancellationException) {
+                throw ce // 弹窗关闭取消穿透不吞
+            } catch (_: Throwable) {
+                null // 判型失败：回退通用三行（引擎侧音频守卫兜底）
+            }
+            if (imageCount != null) sel = sel.copy(audio = false)
+            stage = OrderStage.Modes(imageCount)
+        }
+    }
 
     fun startFlow() {
         if (single == null) {
@@ -267,13 +314,24 @@ internal fun ModeOrderDialog(
                     }
                     Spacer(Modifier.height(11.dp))
                     when (val s = stage) {
-                        OrderStage.Modes -> {
-                            PixelCheckRow("视频 mp4", Sprites.CAMERA, "1080P", sel.video) { sel = sel.copy(video = !sel.video) }
-                            Spacer(Modifier.height(7.dp))
-                            PixelCheckRow("仅音频", Sprites.NOTE, "mp3", sel.audio) { sel = sel.copy(audio = !sel.audio) }
-                            Spacer(Modifier.height(7.dp))
-                            PixelCheckRow("封面", Sprites.IMAGE, "jpg", sel.cover) { sel = sel.copy(cover = !sel.cover) }
-                            if (single != null && isMixedListUrl(single)) {
+                        is OrderStage.Modes -> {
+                            if (s.imageCount != null) {
+ // 图文自适应（ 有什么下什么 ）：没有视频/音频流——「视频」勾选位即图片交付（管道映射 Mode.VIDEO→多图）
+                                PixelCheckRow("图片 · ${s.imageCount} 张", Sprites.IMAGE, "jpg", sel.video) {
+                                    sel = sel.copy(video = !sel.video)
+                                }
+                                Spacer(Modifier.height(7.dp))
+                                PixelCheckRow("封面（首图）", Sprites.IMAGE, "jpg", sel.cover) {
+                                    sel = sel.copy(cover = !sel.cover)
+                                }
+                            } else {
+                                PixelCheckRow("视频 mp4", Sprites.CAMERA, "1080P", sel.video) { sel = sel.copy(video = !sel.video) }
+                                Spacer(Modifier.height(7.dp))
+                                PixelCheckRow("仅音频", Sprites.NOTE, "mp3", sel.audio) { sel = sel.copy(audio = !sel.audio) }
+                                Spacer(Modifier.height(7.dp))
+                                PixelCheckRow("封面", Sprites.IMAGE, "jpg", sel.cover) { sel = sel.copy(cover = !sel.cover) }
+                            }
+                            if (s.imageCount == null && single != null && isMixedListUrl(single)) {
                                 Spacer(Modifier.height(7.dp))
                                 Text(
                                     "链接带着列表 → 默认只下这一个；想收整个列表请粘贴列表页链接",
@@ -283,7 +341,7 @@ internal fun ModeOrderDialog(
                             Spacer(Modifier.height(13.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 val anySelected = sel.video || sel.audio || sel.cover
-                                if (single != null && isMixedListUrl(single)) {
+                                if (s.imageCount == null && single != null && isMixedListUrl(single)) {
                                     PixelButton(
                                         "仅下这一个", enabled = anySelected, icon = Sprites.CHECK,
                                         onClick = { onConfirmSingle(sel, single, null) }, modifier = Modifier.weight(1f),
@@ -295,6 +353,14 @@ internal fun ModeOrderDialog(
                                 )
                                 PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
                             }
+                        }
+                        OrderStage.Sniffing -> {
+                            Text("识别内容…", color = c.textSecondary, fontSize = 13.sp)
+                            Spacer(Modifier.height(9.dp))
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(13.dp))
+ // 关闭=取消预判型（协程随组合销毁自然结束，未入队任何条目——与 Parsing 同语义）
+                            PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.fillMaxWidth())
                         }
                         OrderStage.Parsing -> {
                             Text("解析列表…", color = c.textSecondary, fontSize = 13.sp)
@@ -370,7 +436,7 @@ internal fun ModeOrderDialog(
                                     },
                                     modifier = Modifier.weight(1f),
                                 )
-                                PixelButton("返 回", onClick = { stage = OrderStage.Modes }, modifier = Modifier.weight(1f))
+                                PixelButton("返 回", onClick = { stage = OrderStage.Modes(null) }, modifier = Modifier.weight(1f))
                                 PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
                             }
                         }
@@ -378,7 +444,7 @@ internal fun ModeOrderDialog(
                             Text(s.message, color = c.error, fontSize = 12.sp)
                             Spacer(Modifier.height(13.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                PixelButton("返 回", onClick = { stage = OrderStage.Modes }, modifier = Modifier.weight(1f))
+                                PixelButton("返 回", onClick = { stage = OrderStage.Modes(null) }, modifier = Modifier.weight(1f))
                                 PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
                             }
                         }

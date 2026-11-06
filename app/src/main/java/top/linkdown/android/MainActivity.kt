@@ -325,6 +325,10 @@ class MainActivity : ComponentActivity() {
  // 入口枚举缝（恰一次；抛错=弹窗人话不入队任何条目）
                     (application as LinkdownApplication).pipeline.enumerate(u, ui.sessText)
                 },
+                probeFor = { u ->
+ // 弹窗预判型缝（ 有什么下什么 ）：抖音/小红书/Telegram 开窗判图文/视频，选项自适应
+                    (application as LinkdownApplication).pipeline.probeFor(u, ui.sessText)
+                },
                 onCancel = { runId -> scope.launch { queue.cancel(runId) } },
                 onRetry = { runId -> scope.launch { queue.retry(runId) } },
                 onDeleteQueueItem = { id -> scope.launch { queue.removeTerminal(id) } },

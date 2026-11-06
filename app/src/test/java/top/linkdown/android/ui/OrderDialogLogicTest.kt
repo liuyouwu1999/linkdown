@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.linkdown.android.engine.BatchInfo
+import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.internal.ChildRef
 
 /**
@@ -128,5 +129,46 @@ class OrderDialogLogicTest {
         assertTrue(line.label.contains("截取前"))
         assertTrue("长标题截断显示", line.label.startsWith("一个很长的歌单标题超出一行宽度了啊".take(14)))
         assertTrue(line.label.contains("…"))
+    }
+
+    // ------------------------------------------------------------------
+    // 开窗预判型（ 有什么下什么 ）：图文能力引擎路由 → 初始阶段 → probe 结果折图片张数
+    // ------------------------------------------------------------------
+
+    private fun probeInfo(hasImages: Boolean, playUrl: String?) = ProbeInfo(
+        platform = "抖音", mediaId = "m", sourceUrl = "", title = "t", author = "",
+        coverUrl = null, durationSec = null, isVip = false, playUrl = playUrl, hasImages = hasImages,
+    )
+
+    @Test fun `图文能力路由 抖音短链 iesdouyin xhslink tme 命中`() {
+        assertTrue(isImageCapableUrl("https://v.douyin.com/wwKBWr_IG60/"))
+        assertTrue(isImageCapableUrl("https://www.iesdouyin.com/share/video/7300000000000000000"))
+        assertTrue(isImageCapableUrl("https://xhslink.com/abcDE1"))
+        assertTrue(isImageCapableUrl("https://t.me/s/chan/123"))
+    }
+
+    @Test fun `非图文能力路由 yt-dlp 汽水特例 乱串 不预判`() {
+        assertFalse(isImageCapableUrl("https://www.youtube.com/watch?v=x"))
+        assertFalse(isImageCapableUrl("https://music.douyin.com/qishui/song/1")) // 汽水先于 douyin 通配
+        assertFalse(isImageCapableUrl("https://qishui.douyin.com/song/1"))
+        assertFalse(isImageCapableUrl("https://weibo.com/u/1"))
+        assertFalse(isImageCapableUrl("Not a link at all"))
+    }
+
+    @Test fun `开窗初始阶段 抖音单链进Sniffing 其余直接通用勾选`() {
+        assertEquals("Sniffing", initialOrderStage("https://v.douyin.com/wwKBWr_IG60/")::class.simpleName)
+        val generic = initialOrderStage("https://www.youtube.com/watch?v=x")
+        assertEquals("Modes", generic::class.simpleName)
+        assertTrue("通用三行=imageCount null", generic.toString().contains("null"))
+        val multi = initialOrderStage(null) // 多链接流不预判（逐条判型后引擎侧交付已自适应）
+        assertEquals("Modes", multi::class.simpleName)
+        assertTrue(multi.toString().contains("null"))
+    }
+
+    @Test fun `probe结果折图片张数 图文取并链计数 视频异常回null`() {
+        assertEquals(3, imageCountOf(probeInfo(true, "http://i/1;http://i/2;http://i/3")))
+        assertEquals(2, imageCountOf(probeInfo(true, "http://i/1;;http://i/2"))) // 空段不计
+        assertNull("hasImages=false → null（通用三行）", imageCountOf(probeInfo(false, "http://v/1.mp4")))
+        assertNull("hasImages 但并链空 → null", imageCountOf(probeInfo(true, "")))
     }
 }

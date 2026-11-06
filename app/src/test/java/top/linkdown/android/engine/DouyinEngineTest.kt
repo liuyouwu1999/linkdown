@@ -40,6 +40,8 @@ class DouyinEngineTest {
         const val UA_MOBILE = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
         val VIDEO_BYTES = ByteArray(300) { i -> "VID"[i % 3].code.toByte() } // ≙参考实现 b"VID" * 100
         val COVER_BYTES = byteArrayOf(1, 2, 3, 4, 5)
+        val IMAGE1_BYTES = byteArrayOf(11, 22, 33) // 图文第 1 张（内容可辨，断言逐张不串）
+        val IMAGE2_BYTES = byteArrayOf(44, 55, 66, 77) // 图文第 2 张
     }
 
     private var server: MockWebServer? = null
@@ -85,6 +87,10 @@ class DouyinEngineTest {
                         MockResponse().setResponseCode(200).setBody(Buffer().write(VIDEO_BYTES))
                     path == "/test-cover.jpeg" ->
                         MockResponse().setResponseCode(200).setBody(Buffer().write(COVER_BYTES))
+                    path.startsWith("/test-img1.jpeg") ->
+                        MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE1_BYTES))
+                    path == "/test-img2.jpeg" ->
+                        MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE2_BYTES))
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -256,15 +262,32 @@ class DouyinEngineTest {
         assertEquals("测试视频标题", info.title)
     }
 
-    @Test fun `图集 有images无play_addr 人话暂不支持`() = runBlocking {
+    @Test fun `probe 图集 多图 hasImages playUrl并入 首图兜底封面`() = runBlocking {
         startServer()
         shareForFixture("douyin_router_data_atlas.json")
-        try {
-            engine().probe(shortUrl(), null)
-            fail("应抛 EngineException")
-        } catch (e: EngineException) {
-            assertEquals("抖音图集暂不支持", e.message)
-        }
+        val info = engine().probe(shortUrl(), null)
+        assertTrue(info.hasImages)
+        assertEquals(
+            "webp 渲染版跳过取 jpeg 原图（query 前路径判 webp）",
+            "${base()}/test-img1.jpeg?biz_tag=aweme_images;${base()}/test-img2.jpeg",
+            info.playUrl,
+        )
+        assertFalse(info.playUrl!!.contains(".webp"))
+        assertEquals("无 video.cover → 首图兜底", "${base()}/test-img1.jpeg?biz_tag=aweme_images", info.coverUrl)
+        assertEquals("测试图集标题", info.title)
+        assertEquals("测试博主", info.author)
+        assertEquals("图文无时长", null, info.durationSec)
+    }
+
+    @Test fun `probe 图集带占位play_addr 仍按图文交付 有什么下什么`() = runBlocking {
+        startServer()
+ // 真机实测的 moov atom 形态：图文帖带合成占位 play_addr——images 优先，不得走视频/音频管道
+        shareForFixture("douyin_router_data_atlas_with_play.json")
+        val info = engine().probe(shortUrl(), null)
+        assertTrue(info.hasImages)
+        assertEquals("${base()}/test-img1.jpeg?biz_tag=aweme_images;${base()}/test-img2.jpeg", info.playUrl)
+        assertFalse("占位流不进 playUrl", info.playUrl!!.contains("aweme/v1/play"))
+        assertEquals("${base()}/test-img1.jpeg?biz_tag=aweme_images", info.coverUrl)
     }
 
     @Test fun `play_addr url_list为空 未取到播放地址人话`() = runBlocking {
@@ -345,6 +368,55 @@ class DouyinEngineTest {
         assertTrue(out[0].toFile().readBytes().contentEquals(COVER_BYTES))
         val dl = requestLog.first { it.startsWith("GET /test-cover.jpeg") }
         assertTrue("封面下载同走 PC UA + Referer", dl.contains("UA=$UA_PC ") && dl.contains("Referer=https://www.douyin.com/ "))
+    }
+
+    @Test fun `download 图集 video模式 多图逐张 title-N jpg`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        val e = engine()
+        val info = e.probe(shortUrl(), null)
+        val dir = tmp.newFolder("task-atlas-video")
+        val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+        assertEquals(listOf("测试图集标题-1.jpg", "测试图集标题-2.jpg"), out.map { it.fileName.toString() })
+        assertTrue("第 1 张内容可辨不串图", out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES))
+        assertTrue("第 2 张内容可辨不串图", out[1].toFile().readBytes().contentEquals(IMAGE2_BYTES))
+        val dl = requestLog.first { it.startsWith("GET /test-img1.jpeg") }
+        assertTrue("图片下载同走 PC UA + Referer", dl.contains("UA=$UA_PC ") && dl.contains("Referer=https://www.douyin.com/ "))
+    }
+
+    @Test fun `download 图集 video模式 单图 title-1`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        val e = engine()
+        val info = e.probe(shortUrl(), null).copy(playUrl = "${base()}/test-img1.jpeg")
+        val dir = tmp.newFolder("task-atlas-single")
+        val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+        assertEquals(listOf("测试图集标题-1.jpg"), out.map { it.fileName.toString() })
+    }
+
+    @Test fun `download 图集 audio模式 人话报错不走ffmpeg`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        val e = engine()
+        val info = e.probe(shortUrl(), null)
+        val dir = tmp.newFolder("task-atlas-audio")
+        try {
+            e.download(info, Mode.AUDIO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+            fail("应抛 EngineException")
+        } catch (e: EngineException) {
+            assertEquals("图文没有音频可提取", e.message)
+        }
+    }
+
+    @Test fun `download 图集 cover模式 首图兜底为jpg`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_atlas.json")
+        val e = engine()
+        val info = e.probe(shortUrl(), null)
+        val dir = tmp.newFolder("task-atlas-cover")
+        val out = e.download(info, Mode.COVER, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+        assertEquals(listOf("测试图集标题.jpg"), out.map { it.fileName.toString() })
+        assertTrue(out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES))
     }
 
     @Test fun `download 取消 轮询中止抛已取消`() = runBlocking {

@@ -2,6 +2,7 @@ package top.linkdown.android.engine
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -58,12 +59,40 @@ class DouyinEngine(
             throw EngineException("抖音分享页结构可能已改版，尝试更新工具")
         }
         val video = item["video"] as? JsonObject ?: JsonObject(emptyMap())
-        val playAddrList = (video["play_addr"] as? JsonObject)?.get("url_list") as? JsonArray
- // 图集判定（设计新增人话，参考实现 douyin.py 无此分支）：无 play_addr.url_list 且含 images 键
-        if ((playAddrList == null || playAddrList.isEmpty()) && item.containsKey("images")) {
-            throw EngineException("抖音图集暂不支持")
+        val videoCover = (video["cover"] as? JsonObject)?.get("url_list")?.let { list ->
+            (list as? JsonArray)?.firstOrNull()?.let { p ->
+                (p as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+            }
+        }
+        val title = (item["desc"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+            ?.takeIf { it.isNotEmpty() } ?: vid // ≙参考实现 item.get("desc") or vid
+        val author = (item["author"] as? JsonObject)?.get("nickname")?.let { p ->
+            (p as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+        } ?: ""
+ // 图文/图集分支（「有什么下什么」，参考实现 douyin.py 无此分支）：item 含 images → 按图文交付。
+ // ⚠️不能只看 play_addr 是否为空：实测图文帖常带合成占位 play_addr（落盘非有效视频，
+ // ffmpeg 报 moov atom not found）。形态照 XhsEngine 图文：图片直链「;」并入 playUrl、首图兜底封面。
+ // 有意取舍：实况照片类混合帖（真视频流+images 并存）也按图文交付，视频流不取——
+ // images 是帖子主体，避免同一帖两套产物语义。
+        val imageUrls = (item["images"] as? JsonArray).orEmpty().mapNotNull { e ->
+            imageDirectUrl(((e as? JsonObject)?.get("url_list") as? JsonArray).orEmpty())
+        }
+        if (imageUrls.isNotEmpty()) {
+            return ProbeInfo(
+                platform = PlatformDirs.DOUYIN,
+                mediaId = vid,
+                sourceUrl = url,
+                title = title,
+                author = author,
+                coverUrl = videoCover?.takeIf { it.isNotEmpty() } ?: imageUrls.first(),
+                durationSec = null, // 图文无时长
+                isVip = false,
+                playUrl = imageUrls.joinToString(";"),
+                hasImages = true,
+            )
         }
  // ≙参考实现 ((video.get("play_addr") or {}).get("url_list") or [""])[0].replace("playwm", "play")
+        val playAddrList = (video["play_addr"] as? JsonObject)?.get("url_list") as? JsonArray
         val playUrl = playAddrList.orEmpty().asSequence()
             .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p !is JsonNull }?.content }
             .firstOrNull().orEmpty().replace("playwm", "play")
@@ -74,21 +103,14 @@ class DouyinEngine(
             platform = PlatformDirs.DOUYIN, // 入库目录名（判重前缀/货架分组同源）
             mediaId = vid,
             sourceUrl = url, // probe 原样带回的原始链接
-            title = (item["desc"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
-                ?.takeIf { it.isNotEmpty() } ?: vid, // ≙参考实现 item.get("desc") or vid
-            author = (item["author"] as? JsonObject)?.get("nickname")?.let { p ->
-                (p as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
-            } ?: "",
-            coverUrl = (video["cover"] as? JsonObject)?.get("url_list")?.let { list ->
-                (list as? JsonArray)?.firstOrNull()?.let { p ->
-                    (p as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
-                }
-            },
+            title = title,
+            author = author,
+            coverUrl = videoCover,
             durationSec = (video["duration"] as? JsonPrimitive)?.takeIf { it !is JsonNull }
                 ?.content?.toDoubleOrNull()?.div(1000.0)?.takeIf { it != 0.0 }, // 参考实现 ms→s，0 视为缺失
             isVip = false,
             playUrl = playUrl,
-            hasImages = item.containsKey("images"),
+            hasImages = false,
         )
     }
 
@@ -156,6 +178,8 @@ class DouyinEngine(
                 listOf(finish(raw, info.title))
             }
             Mode.AUDIO -> {
+ // 图文没有音频流（人话直达 UI；管道已前置跳过，此为引擎侧兜底——XhsEngine 同款）
+                if (info.hasImages) throw EngineException(IMAGE_NO_AUDIO_MESSAGE)
                 val raw = taskDir.resolve("video.mp4")
                 streamToFile(requirePlayUrl(info), raw, onProgress, cancelHandle::isCancelled)
                 onProgress(1.0f, DOWNLOAD_DONE_LABEL)
@@ -165,6 +189,8 @@ class DouyinEngine(
                 listOf(finish(audio, info.title))
             }
             Mode.VIDEO -> {
+ // 图文：有什么下什么——多图逐张（title-1/2/3.jpg…），不走视频管道
+                if (info.hasImages) return imagesFlow(info, taskDir, onProgress, cancelHandle::isCancelled)
                 val raw = taskDir.resolve("video.mp4")
                 streamToFile(requirePlayUrl(info), raw, onProgress, cancelHandle::isCancelled)
                 onProgress(1.0f, DOWNLOAD_DONE_LABEL)
@@ -173,8 +199,40 @@ class DouyinEngine(
         }
     }
 
+ /** 图文流：多图逐张下载（title-1/2/3.jpg…，≙XhsEngine.imagesFlow 图文形态）。 */
+    private fun imagesFlow(info: ProbeInfo, taskDir: Path,
+                           onProgress: (Float, String) -> Unit,
+                           isCancelled: () -> Boolean): List<Path> {
+        val urls = info.playUrl?.split(";")?.filter { it.isNotBlank() } ?: emptyList()
+        if (urls.isEmpty()) throw EngineException(NO_PLAY_URL_MESSAGE)
+        val products = mutableListOf<Path>()
+        urls.forEachIndexed { i, u ->
+            val raw = taskDir.resolve("img-$i")
+            streamToFile(u, raw, onProgress, isCancelled)
+            val final = taskDir.resolve(safeFilename("${info.title}-${i + 1}") + ".jpg")
+            Files.move(raw, final, StandardCopyOption.REPLACE_EXISTING)
+            products.add(final) // Path 实现了 Iterable，+= 有重载歧义，须显式 add（XhsEngine 同款）
+        }
+        onProgress(1.0f, DOWNLOAD_DONE_LABEL)
+        return products
+    }
+
     private fun requirePlayUrl(info: ProbeInfo): String =
         info.playUrl?.takeIf { it.isNotEmpty() } ?: throw EngineException(NO_PLAY_URL_MESSAGE)
+
+ /** 图文单张直链：url_list 优先非 webp（douyinpic 常把 webp 渲染版排前、JPEG 原图在后，
+ * parse-video-py 同款启发式；query 前路径判 webp 防 `xxx.webp?biz_tag=…` 漏判），全 webp → 首项兜底；
+ * 协议相对 `//host/…` 补 https。 */
+    private fun imageDirectUrl(entries: List<JsonElement>): String? {
+        val urls = entries.asSequence()
+            .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p !is JsonNull }?.content }
+            .filter { it.isNotEmpty() }
+            .toList()
+        val picked = urls.firstOrNull { !it.substringBefore('?').endsWith(".webp") }
+            ?: urls.firstOrNull()
+            ?: return null
+        return if (picked.startsWith("//")) "https:$picked" else picked
+    }
 
  /** 参考实现 下载循环：UA=PC + Referer www.douyin.com；raise_for_status；64KB 分块流式 +
  * Content-Length 已知时 MB 进度（f"{done/1e6:.1f}/{total/1e6:.1f} MB"）；逐块查取消。 */
@@ -242,5 +300,6 @@ class DouyinEngine(
         private const val CHUNK_BYTES = 1 shl 16
         private const val DOWNLOAD_DONE_LABEL = "下载完成"
         private const val NO_PLAY_URL_MESSAGE = "未取到播放地址，视频可能已删除或仅登录可见"
+        private const val IMAGE_NO_AUDIO_MESSAGE = "图文没有音频可提取"
     }
 }
