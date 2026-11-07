@@ -27,6 +27,9 @@ internal object MotionPhotoContainer {
         val suffix = when (format) {
             LivePhotoFormat.SAMSUNG -> samsungFooter(video.length(), prefix.size)
             LivePhotoFormat.HUAWEI -> huaweiTail(video.length(), videoFrameCount)
+            // vivo 单文件（微信实况识别条件，真机差分实验 2026-11-07）：视频尾部必须带两个
+            // vivo uuid 盒（EStream+ExtInfo，≡相机原片字节）；XMP Item:Length 覆盖视频+尾标
+            LivePhotoFormat.VIVO -> vivoMotionUuidTail()
             else -> byteArrayOf()
         }
         val xmp = if (format == LivePhotoFormat.HUAWEI) byteArrayOf() else segment(0xe1,
@@ -138,7 +141,7 @@ internal object MotionPhotoContainer {
             """.trimIndent()
             LivePhotoFormat.VIVO -> """
                 xmlns:VCamera="http://ns.vivo.com/photos/1.0/camera/"
-                VCamera:VMotionPhotoVersion="1" VCamera:VMotionPhotoSource="1" VCamera:VMediaKitVersion="1.0.0.9"
+                VCamera:VMotionPhotoVersion="1" VCamera:VMotionPhotoSource="1" VCamera:VMediaKitVersion="1.0.0.5"
             """.trimIndent()
             else -> ""
         }
@@ -148,8 +151,14 @@ internal object MotionPhotoContainer {
             GCamera:MicroVideoOffset="$videoLength" GCamera:MicroVideoPresentationTimestampUs="-1"
         """.trimIndent() else ""
         // Match vendor writers' default cover convention; only generic/Samsung use unknown time.
-        val timestamp = if (format in setOf(LivePhotoFormat.OPLUS, LivePhotoFormat.VIVO)) 0 else -1
-        val primaryExtent = if (format == LivePhotoFormat.VIVO) "" else "Item:Length=\"0\" Item:Padding=\"$padding\""
+        // vivo：非零固定值——微信识别的真机差分实验（2026-11-07，vivo X300）中 500000 与相机
+        // 真实值（832382）均被识别，0/-1 未验证；相机证据对齐优先。
+        val timestamp = when (format) {
+            LivePhotoFormat.OPLUS -> 0
+            LivePhotoFormat.VIVO -> VIVO_COVER_TIMESTAMP_US
+            else -> -1
+        }
+        val primaryExtent = "Item:Length=\"0\" Item:Padding=\"$padding\""
         return """
             <x:xmpmeta xmlns:x="adobe:ns:meta/">
             <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -248,6 +257,41 @@ internal object MotionPhotoContainer {
             .putInt(36).put("SEFT".toByteArray()).array()
         return version + index
     }
+
+    /**
+     * vivo 单文件实况的视频尾标：两个顶层 uuid 盒（vivoMediaEStream + vivoMediaExtInfo），
+     * 追加在视频字节之后、XMP Item:Length 一并覆盖。结构与取值逐字节对照 vivo X300 相机
+     * 原片样本（2026-11-07 采集），并在微信 Android 选择器的真机差分实验中被确认为
+     * 识别必要条件（无此尾标→不识别；H264 视频补此尾标→识别）。ExtInfo 盒与 VIVO_LEGACY
+     * 的 [vivoTail] 同构（cameralbum!+ID+固定签名），ID 为相机同款字面量 motionphoto…。
+     */
+    private fun vivoMotionUuidTail(): ByteArray {
+        val streamPayload = java.util.Base64.getDecoder().decode(VIVO_ESTREAM_PAYLOAD_B64)
+        val json = ("vivo{\"com.android.camera.compensation\":\"[]\",\"com.android.camera.takenmodel\":\"vivo X300\"," +
+            "\"com.android.camera.camerafacing\":\"0\",\"com.android.camera.imageTime\":27," +
+            "\"com.android.camera.livePhoto.firstFrame\":472480047044,\"com.android.camera.moduleid\":\"photo\"," +
+            "\"version\":2202,\"com.android.camera.livephoto\":\"$VIVO_PAIR_ID\"," +
+            "\"com.android.camera.faceInfo\":{}}").toByteArray(Charsets.UTF_8)
+        val extInfo = bytes {
+            write(json)
+            writeInt(json.size - 4)
+            writeBytes("cameralbum!")
+            writeInt(VIVO_PAIR_ID.length + 19)
+            writeBytes(VIVO_PAIR_ID)
+            writeInt(-1)
+            write(byteArrayOf(0x1b, 0x2a, 0x39, 0x48, 0x57, 0x66, 0x75, 0x84.toByte(), 0x93.toByte(), 0xa2.toByte(), 0xb3.toByte()))
+        }
+        return bytes {
+            writeInt(24 + streamPayload.size); writeBytes("uuidvivoMediaEStream"); write(streamPayload)
+            writeInt(24 + extInfo.size); writeBytes("uuidvivoMediaExtInfo"); write(extInfo)
+        }
+    }
+
+    // vivo 相机样本的 EStream 流参数块（opaque，587 字节尾标的一部分；来源同上差分实验）
+    private const val VIVO_ESTREAM_PAYLOAD_B64 =
+        "c3RyZWFtZGF0YURFR1MAAv4BAAD+AgAA/gMAAQAA/gQAAAAA/gUAAAAA/gYAAAAA/gcAAA/w/ggAAAwA/goAAAEy/gsAAABa/gwAAAAAREVHRXN0cmVhbWluZm8ABgABBgAAAEhzdHJlYW1jb3VudAAB"
+    private const val VIVO_PAIR_ID = "motionphoto00010000000000000"
+    private const val VIVO_COVER_TIMESTAMP_US = 500000
 
     private fun huaweiTail(videoLength: Long, videoFrameCount: Int): ByteArray {
         require(videoLength in 1..Long.MAX_VALUE - 20 && videoFrameCount > 0)

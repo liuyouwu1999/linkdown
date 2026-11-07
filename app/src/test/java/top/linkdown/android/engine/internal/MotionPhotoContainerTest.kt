@@ -16,6 +16,8 @@ import org.junit.rules.TemporaryFolder
  * NEORUAA/XHS_Downloader_Android MotionPhotoContainerTest（pinned 二进制/XMP 参考在
  * test resources /livephoto/，README 记录来源）。协议与真机验收边界见该 README 与
  * 上游 docs/LIVE_PHOTO_COMPATIBILITY.md。
+ * ⚠️有意偏离：VIVO 分支已按 vivo X300 相机原片证据 + 微信识别差分实验（2026-11-07）调整
+ * （uuid 尾标/非零时间戳/Primary 长度声明），不再与上游参考逐字节对齐——见 vivo 相应用例。
  */
 class MotionPhotoContainerTest {
     @get:Rule val temp = TemporaryFolder()
@@ -38,20 +40,19 @@ class MotionPhotoContainerTest {
         assertArrayEquals(reference("vivo-video-uuid.bin"), MotionPhotoContainer.vivoVideoBox(id))
         val (huawei, _) = write(LivePhotoFormat.HUAWEI)
         assertArrayEquals(reference("huawei-tail.bin"), huawei.readBytes().takeLast(60).toByteArray())
+        val (vivo, _) = write(LivePhotoFormat.VIVO)
+        assertArrayEquals(reference("vivo-uuid-tail.bin"), vivo.readBytes().takeLast(587).toByteArray())
     }
 
-    @Test fun vivoSdrMetadataMatchesUpstreamIncludingCompleteUserComment() {
-        fun fields(xml: ByteArray): List<Map<String, String>> {
-            val document = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-                .newDocumentBuilder().parse(xml.inputStream())
-            val nodes = document.getElementsByTagName("*")
-            return (0 until nodes.length).map { nodes.item(it) }.filter { it.localName in setOf("Description", "Item") }.map { node ->
-                (0 until node.attributes.length).map { node.attributes.item(it) }
-                    .filter { it.namespaceURI != "http://www.w3.org/2000/xmlns/" }
-                    .associate { "${it.namespaceURI}:${it.localName}" to it.nodeValue }
-            }
-        }
-        assertEquals(fields(reference("vivo-sdr-reference.xmp")), fields(MotionPhotoContainer.xmp(LivePhotoFormat.VIVO, video.size.toLong(), 0, "video/mp4").toByteArray()))
+    @Test fun vivoMetadataMatchesCameraEvidenceForWeChatRecognition() {
+        // 偏离上游参考的 VIVO 配方按 vivo X300 相机原片证据钉死（微信识别差分实验 2026-11-07）：
+        // VCamera 三字段 + 非零时间戳（500000 与相机真实值均被识别）+ Primary 长度声明
+        val xml = MotionPhotoContainer.xmp(LivePhotoFormat.VIVO, video.size.toLong(), 0, "video/mp4")
+        assertTrue(xml.contains("VCamera:VMotionPhotoVersion=\"1\""))
+        assertTrue(xml.contains("VCamera:VMotionPhotoSource=\"1\""))
+        assertTrue(xml.contains("VCamera:VMediaKitVersion=\"1.0.0.5\""))
+        assertTrue(xml.contains("GCamera:MotionPhotoPresentationTimestampUs=\"500000\""))
+        assertTrue(xml.contains("Item:Semantic=\"Primary\" Item:Length=\"0\" Item:Padding=\"0\""))
         assertEquals(String(reference("vivo-user-comment.txt")), LivePhotoCreator.vivoUserComment("2000:01:01 00:00:00"))
     }
 
@@ -103,7 +104,7 @@ class MotionPhotoContainerTest {
                 val length = motion.getAttributeNS(itemNs, "Length").toLong()
                 assertEquals(layout.videoOffset, data.size - length)
                 val primary = items.item(0) as org.w3c.dom.Element
-                assertEquals(when (format) { LivePhotoFormat.SAMSUNG -> "24"; LivePhotoFormat.VIVO -> ""; else -> "0" }, primary.getAttributeNS(itemNs, "Padding"))
+                assertEquals(if (format == LivePhotoFormat.SAMSUNG) "24" else "0", primary.getAttributeNS(itemNs, "Padding"))
                 assertEquals("video/mp4", motion.getAttributeNS(itemNs, "Mime"))
             }
         }

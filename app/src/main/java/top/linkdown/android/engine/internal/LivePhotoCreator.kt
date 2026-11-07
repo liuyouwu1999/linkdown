@@ -46,7 +46,10 @@ object LivePhotoCreator {
             checkActive()
             val resolved = resolveFormat()
             val mime = MotionPhotoContainer.videoMime(videoFile, checkActive)
-            if (resolved in setOf(LivePhotoFormat.OPLUS, LivePhotoFormat.HUAWEI) && mime != "video/mp4") {
+            // VIVO 一并要求 MP4：uuid 尾标配方按 mp4 样本验证（MOV 未验证，回退两文件交付）
+            if (resolved in setOf(LivePhotoFormat.OPLUS, LivePhotoFormat.HUAWEI, LivePhotoFormat.VIVO) &&
+                mime != "video/mp4"
+            ) {
                 throw IOException("Selected live photo format requires MP4")
             }
             val countFrames = resolved == LivePhotoFormat.HUAWEI

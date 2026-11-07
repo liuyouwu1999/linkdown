@@ -19,8 +19,15 @@ Tests consume frozen fixtures and never download or invoke reference projects.
 - `oplus-mpf-4096.bin`: direct `_build_mpf_segment(4096)` output from
   [Young-Spark/oppo-live-photo-maker](https://github.com/Young-Spark/oppo-live-photo-maker/tree/3d020598789e8eebb0fa042b993ea03e4d21c2f9), MIT.
   The test replaces only the image-size field with its actual JPEG length.
-- `vivo-sdr-reference.xmp` and `vivo-user-comment.txt`: extracted constants from `VivoLivePhotoProtocol.cs`
+- `vivo-user-comment.txt`: extracted constants from `VivoLivePhotoProtocol.cs`
   in [LengxiQwQ/live-photo-box](https://github.com/LengxiQwQ/live-photo-box/tree/66b619249c32a6d6d4080063d64df9471589f003), GPL-3.0.
+  (`vivo-sdr-reference.xmp` from the same source was removed with the upstream-parity VIVO test
+  in 2026-11; the VIVO branch now follows camera evidence below.)
+- `vivo-uuid-tail.bin` (587 bytes): the two trailing uuid boxes (`vivoMediaEStream` + `vivoMediaExtInfo`)
+  extracted verbatim from the embedded video of a vivo X300 camera motion photo sample, 2026-11-07.
+  Byte-identical replication is deliberate: WeChat's vivo live-photo recognition was proven by on-device
+  differential testing to require this exact tail (and VCamera XMP fields); provenance is the project
+  owner's own camera sample, not a third-party repository.
 - `vivo-image-tail.bin`, `vivo-video-uuid.bin`: the same repository's `VivoDualFileMetadataWriter.cs`
   JSON constants, with an independent Python transcription of its binary envelope. Fixed ID:
   `0123456789abcdef0123456789ab`. This does not execute the C# runtime.
