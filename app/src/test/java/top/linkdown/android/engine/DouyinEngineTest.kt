@@ -42,6 +42,7 @@ class DouyinEngineTest {
         val COVER_BYTES = byteArrayOf(1, 2, 3, 4, 5)
         val IMAGE1_BYTES = byteArrayOf(11, 22, 33) // 图文第 1 张（内容可辨，断言逐张不串）
         val IMAGE2_BYTES = byteArrayOf(44, 55, 66, 77) // 图文第 2 张
+        val IMAGE3_BYTES = byteArrayOf(88, 99, 11, 22, 33) // 图文第 3 张（混合帖用）
         val LIVE_BYTES = byteArrayOf(9, 8, 7, 6, 5) // 实况图动态流（与静图可辨）
 
         /** 测试用 douyin.txt（登录态：sessionid+UIFID） */
@@ -65,6 +66,10 @@ class DouyinEngineTest {
         .addHeader("Set-Cookie", "ttwid=mock-ttwid-token; Path=/")
     private var shareResponse: (cookie: String?) -> MockResponse = {
         MockResponse().setResponseCode(200).setBody(sharePage(fixtureText()))
+    }
+ /** 可按用例改写的桩：签名 detail 接口响应（lambda 惰性构造——server 未起时 fixtureText 会 NPE）。 */
+    private var detailResponse: () -> MockResponse = {
+        MockResponse().setResponseCode(200).setBody(fixtureText("douyin_detail_live.json"))
     }
 
     @After fun tearDown() {
@@ -104,12 +109,13 @@ class DouyinEngineTest {
                         MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE1_BYTES))
                     path == "/test-img2.jpeg" ->
                         MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE2_BYTES))
+                    path.startsWith("/test-img3.jpeg") ->
+                        MockResponse().setResponseCode(200).setBody(Buffer().write(IMAGE3_BYTES))
                     path == "/test-live1.mp4" ->
                         MockResponse().setResponseCode(200).setBody(Buffer().write(LIVE_BYTES))
                     path == "/test-live2.mp4" ->
                         MockResponse().setResponseCode(200).setBody(Buffer().write(LIVE_BYTES))
-                    path.startsWith("/aweme/v1/web/aweme/detail/") ->
-                        MockResponse().setResponseCode(200).setBody(fixtureText("douyin_detail_live.json"))
+                    path.startsWith("/aweme/v1/web/aweme/detail/") -> detailResponse()
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -163,6 +169,10 @@ class DouyinEngineTest {
 
     private fun shareForFixture(name: String) {
         shareResponse = { MockResponse().setResponseCode(200).setBody(sharePage(fixtureText(name))) }
+    }
+
+    private fun detailForFixture(name: String) {
+        detailResponse = { MockResponse().setResponseCode(200).setBody(fixtureText(name)) }
     }
 
  // cancelHandle 形参桩（原 8 号位 isCancelled lambda：{ false }→noCancel、{ true }→cancelNow）
@@ -532,6 +542,48 @@ class DouyinEngineTest {
         )
         assertTrue("实况流字节可辨", out[1].toFile().readBytes().contentEquals(LIVE_BYTES))
         assertTrue(out[3].toFile().readBytes().contentEquals(LIVE_BYTES))
+    }
+
+    @Test fun `probe 混合帖带 cookie detail 静图位空串占位不错位`() = runBlocking {
+ // 实况+静图混排（3 图：第 1/3 实况、第 2 静图）——回归 bug：mapNotNull 丢静图张后
+ // 长度不齐 → size 判等失败 → 整帖降级静图；修复后并行列表静图位空串占位
+        startServer()
+        shareForFixture("douyin_router_data_live_mixed.json")
+        detailForFixture("douyin_detail_live_mixed.json")
+        val cookieFile = douyinCookieFile(tmp.root)
+        val info = engine().probe(shortUrl(), cookieFile)
+        assertTrue(info.hasImages)
+        assertEquals(
+            "detail 实况流与图片同序同长（静图位=空串）",
+            listOf("${base()}/test-live1.mp4", "", "${base()}/test-live2.mp4"),
+            info.liveUrls,
+        )
+        assertEquals("三张图并入 playUrl", 3, info.playUrl!!.split(";").size)
+    }
+
+    @Test fun `download 混合帖 实况张成对静图张只出图`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_live_mixed.json")
+        detailForFixture("douyin_detail_live_mixed.json")
+        val cookieFile = douyinCookieFile(tmp.root)
+        val e = engine()
+        val info = e.probe(shortUrl(), cookieFile)
+        val dir = tmp.newFolder("task-live-mixed")
+        val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+        assertEquals(
+            "第 1/3 张实况成对、第 2 张只有静图",
+            listOf(
+                "测试混合标题-1.jpg", "测试混合标题-1-实况.mp4",
+                "测试混合标题-2.jpg",
+                "测试混合标题-3.jpg", "测试混合标题-3-实况.mp4",
+            ),
+            out.map { it.fileName.toString() },
+        )
+        assertTrue(out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES))
+        assertTrue(out[1].toFile().readBytes().contentEquals(LIVE_BYTES))
+        assertTrue("静图张不带实况流", out[2].toFile().readBytes().contentEquals(IMAGE2_BYTES))
+        assertTrue(out[3].toFile().readBytes().contentEquals(IMAGE3_BYTES))
+        assertTrue(out[4].toFile().readBytes().contentEquals(LIVE_BYTES))
     }
 
     @Test fun `probe 图集无 cookie 不请求 detail 静图降级`() = runBlocking {

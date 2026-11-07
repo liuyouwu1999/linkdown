@@ -32,4 +32,8 @@ object CookieStore {
         File(filesDir, "cookies/$platform.txt").takeIf { it.exists() }
     fun write(platform: String, entries: List<NetscapeCookieFile.Entry>, filesDir: File): File =
         File(filesDir, "cookies/$platform.txt").also { NetscapeCookieFile.write(entries, it) }
+
+    /** 登录中心「清除」：删平台 cookie 文件（引擎侧登出）。返回是否确有文件被删。 */
+    fun delete(platform: String, filesDir: File): Boolean =
+        File(filesDir, "cookies/$platform.txt").let { it.exists() && it.delete() }
 }

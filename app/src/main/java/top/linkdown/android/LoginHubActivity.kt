@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import top.linkdown.android.cookies.CookieStore
+import top.linkdown.android.ui.PixelConfirmDialog
 import top.linkdown.android.ui.PixelIcon
 import top.linkdown.android.ui.PixelTheme
 import top.linkdown.android.ui.Sprites
@@ -58,11 +59,35 @@ class LoginHubActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
-        setContent { PixelTheme { LoginHubScreen(onOpenPlatform = { openPlatform(it) }) } }
+        setContent {
+            PixelTheme {
+                LoginHubScreen(
+                    onOpenPlatform = { openPlatform(it) },
+                    onClear = { platform, filesDir -> clearPlatform(platform, filesDir) },
+                )
+            }
+        }
     }
 
     private fun openPlatform(platform: String) {
         startActivity(Intent(this, CookieLoginActivity::class.java).putExtra(CookieLoginActivity.EXTRA_PLATFORM, platform))
+    }
+
+ /**
+* 登录中心「清除」（ 登出 ）：WebView 域内 cookie 逐名过期（host-only 与 domain 两种属性
+* 各发一遍 Max-Age=0，防残留任一形态）+ 删平台 cookie 文件（引擎侧登出）。返回文件是否确有删除。
+*/
+    private fun clearPlatform(platform: String, filesDir: java.io.File): Boolean {
+        val cfg = loginCfgFor(platform)
+        val cm = android.webkit.CookieManager.getInstance()
+        val names = cm.getCookie(cfg.cookieUrl).orEmpty()
+            .split(";").map { it.trim().substringBefore('=') }.filter { it.isNotEmpty() }
+        names.forEach { name ->
+            cm.setCookie(cfg.cookieUrl, "$name=; Path=/; Max-Age=0")
+            cm.setCookie(cfg.cookieUrl, "$name=; Domain=${cfg.domain}; Path=/; Max-Age=0")
+        }
+        cm.flush()
+        return CookieStore.delete(platform, filesDir)
     }
 }
 
@@ -80,10 +105,14 @@ internal fun platformDisplayName(platform: String): String = when (platform) {
 }
 
 @Composable
-private fun LoginHubScreen(onOpenPlatform: (String) -> Unit) {
+private fun LoginHubScreen(
+    onOpenPlatform: (String) -> Unit,
+    onClear: (String, java.io.File) -> Boolean,
+) {
     val c = PixelTheme.colors
     val context = androidx.compose.ui.platform.LocalContext.current
     var status by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var pendingClear by remember { mutableStateOf<String?>(null) }
     LifecycleResumeEffect(Unit) {
  // 每次回前台刷新（CookieLoginActivity 保存后 finish 回到本页也会触发）
         status = LOGIN_PLATFORMS.associateWith { CookieStore.existing(it, context.filesDir) != null }
@@ -119,6 +148,7 @@ private fun LoginHubScreen(onOpenPlatform: (String) -> Unit) {
                     platform = platform,
                     hasCookie = status[platform] == true,
                     onClick = { onOpenPlatform(platform) },
+                    onClear = { pendingClear = platform },
                 )
             }
         }
@@ -130,10 +160,34 @@ private fun LoginHubScreen(onOpenPlatform: (String) -> Unit) {
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
+ // 清除确认（PixelConfirmDialog 同款像素风）
+    pendingClear?.let { platform ->
+        PixelConfirmDialog(
+            title = "清除${platformDisplayName(platform)}登录？",
+            message = "清除后下载不再携带${platformDisplayName(platform)}登录态（实况图等登录功能需重新登录才生效）。",
+            confirmText = "清 除",
+            onConfirm = {
+                val removed = onClear(platform, context.filesDir)
+                status = LOGIN_PLATFORMS.associateWith { CookieStore.existing(it, context.filesDir) != null }
+                android.widget.Toast.makeText(
+                    context,
+                    if (removed) "已清除${platformDisplayName(platform)}登录" else "${platformDisplayName(platform)}本就没有登录信息",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+                pendingClear = null
+            },
+            onDismiss = { pendingClear = null },
+        )
+    }
 }
 
 @Composable
-private fun LoginPlatformRow(platform: String, hasCookie: Boolean, onClick: () -> Unit) {
+private fun LoginPlatformRow(
+    platform: String,
+    hasCookie: Boolean,
+    onClick: () -> Unit,
+    onClear: () -> Unit,
+) {
     val c = PixelTheme.colors
     val shape = RoundedCornerShape(8.dp)
     val isNetease = platform == CookieLoginActivity.PLATFORM_NETEASE
@@ -168,6 +222,19 @@ private fun LoginPlatformRow(platform: String, hasCookie: Boolean, onClick: () -
         }
         Spacer(Modifier.width(8.dp))
         val btnShape = RoundedCornerShape(5.dp)
+ // 「清除」只在有 cookie 时出现（outline 底=次要动作，不抢登录主按钮）
+        if (hasCookie) {
+            Box(
+                Modifier
+                    .background(c.surface, btnShape)
+                    .border(2.dp, c.outline, btnShape)
+                    .clickable(remember { MutableInteractionSource() }, indication = null) { onClear() }
+                    .padding(horizontal = 9.dp, vertical = 6.dp),
+            ) {
+                Text("清除", color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
         Box(
             Modifier
                 .background(c.primary, btnShape)

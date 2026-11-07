@@ -92,6 +92,8 @@ class DouyinEngine(
             val detailLiveUrls = cookies?.takeIf { it.exists() }
                 ?.let { runCatching { fetchLiveUrlsViaDetail(vid, it) }.getOrNull() }
                 ?: emptyList()
+            // detail 成功时为并行列表（静图张空串占位）；长度不齐=detail 图数与 share 不一致的异常
+            // 形态 → 错位风险 → 保守回退 share 侧（静图降级）
             val liveUrls = if (detailLiveUrls.size == imagePairs.size) detailLiveUrls
             else imagePairs.map { it.second }
             return ProbeInfo(
@@ -243,10 +245,11 @@ class DouyinEngine(
     }
 
  /**
- * 签名 detail 接口取实况流（ 实况图有什么下什么 ，真机实测配方）：
- * 登录 cookie（douyin.txt，含 sessionid+UIFID）+ a_bogus/websign 双签名（DouyinSign）。
- * 返回与图片同序的实况直链列表；任何失败 → 空表（静图降级，不阻断 probe）。
- */
+* 签名 detail 接口取实况流（ 实况图有什么下什么 ，真机实测配方）：
+* 登录 cookie（douyin.txt，含 sessionid+UIFID）+ a_bogus/websign 双签名（DouyinSign）。
+* 返回与 images **同序同长的并行列表**（实况张=直链，静图张=空串占位）；
+* 任何失败 → 空表（静图降级，不阻断 probe）。
+*/
     private fun fetchLiveUrlsViaDetail(vid: String, cookieFile: File): List<String> {
         val entries = NetscapeCookieFile.parse(cookieFile.readText())
             .filter { it.name.isNotEmpty() && it.value.isNotEmpty() }
@@ -283,14 +286,9 @@ class DouyinEngine(
             val detail = (Json.parseToJsonElement(body).jsonObject["aweme_detail"] as? JsonObject)
                 ?: return emptyList()
             val imgs = (detail["images"] as? JsonArray) ?: return emptyList()
-            return imgs.mapNotNull { e ->
-                val imgObj = e as? JsonObject ?: return@mapNotNull null
-                val urls = (((imgObj["video"] as? JsonObject)?.get("play_addr") as? JsonObject)
-                    ?.get("url_list")) as? JsonArray ?: return@mapNotNull null
-                urls.asSequence()
-                    .mapNotNull { p -> (p as? JsonPrimitive)?.takeIf { q -> q !is JsonNull }?.content }
-                    .firstOrNull { it.isNotBlank() }
-            }
+            // 必须并行列表（liveVideoUrl 同款语义：无 video 键的静图张=空串占位），不可 mapNotNull 丢
+            // 元素——实况+静图混排帖丢元素后长度不齐 → probe 处 size 判等失败 → 整帖降级静图（真机 bug）
+            return imgs.map { liveVideoUrl(it) }
         }
     }
 

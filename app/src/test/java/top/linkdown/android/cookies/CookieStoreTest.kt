@@ -63,4 +63,16 @@ class CookieStoreTest {
             assertNull(CookieStore.forUrl("https://www.qishui.com/s/123", null, root))
         } finally { root.deleteRecursively() }
     }
+
+    @Test fun `delete 清除平台 cookie 文件`() {
+        val root = tempRoot()
+        try {
+ // 无文件 → false（幂等）；有文件 → true 且文件消失（引擎侧登出生效）
+            org.junit.Assert.assertFalse("无文件时清除=幂等 false", CookieStore.delete("douyin", root))
+            val f = seed(root, "douyin")
+            org.junit.Assert.assertTrue(CookieStore.delete("douyin", root))
+            org.junit.Assert.assertFalse("删除后文件不存在", f.exists())
+            assertNull("清除后探测为 null", CookieStore.douyin(root))
+        } finally { root.deleteRecursively() }
+    }
 }
