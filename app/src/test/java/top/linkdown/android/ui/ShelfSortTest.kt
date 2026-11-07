@@ -44,4 +44,14 @@ class ShelfSortTest {
     fun empty_staysEmpty() {
         assertEquals(emptyList<Int>(), shelfSortedIndices(emptyList(), emptyList(), ShelfSort.KIND))
     }
+
+    @Test fun `entries 排序 TIME 恒等 NAME 按 title KIND 按 min ordinal`() {
+        // titles/kindOrdinals/dates 三键与 ShelfEntry 派生规则一致（Bound.dateAdded=max、Bound.kindOrdinal=min）
+        val titles = listOf("b", "a", "c")
+        val kindOrdinals = listOf(0, 2, 1) // VIDEO, IMAGE, AUDIO
+        val dates = listOf(3L, 1L, 2L)
+        assertEquals(listOf(0, 1, 2), shelfEntrySortedIndices(titles, kindOrdinals, dates, ShelfSort.TIME))
+        assertEquals(listOf(1, 0, 2), shelfEntrySortedIndices(titles, kindOrdinals, dates, ShelfSort.NAME))
+        assertEquals(listOf(0, 2, 1), shelfEntrySortedIndices(titles, kindOrdinals, dates, ShelfSort.KIND))
+    }
 }

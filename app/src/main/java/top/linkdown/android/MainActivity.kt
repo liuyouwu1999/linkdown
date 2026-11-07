@@ -45,13 +45,16 @@ import top.linkdown.android.pipeline.PlatformDirs
 import top.linkdown.android.queue.EnqueueResult
 import top.linkdown.android.queue.QueueState
 import top.linkdown.android.settings.AppSettings
+import top.linkdown.android.ui.BookReader
+import top.linkdown.android.ui.BoundEntry
 import top.linkdown.android.ui.MainScreen
 import top.linkdown.android.ui.MainUiState
 import top.linkdown.android.ui.PixelTheme
 import top.linkdown.android.ui.SettingsScreen
-import top.linkdown.android.ui.ShelfItem
+import top.linkdown.android.ui.ShelfEntry
 import top.linkdown.android.ui.ShelfScreen
 import top.linkdown.android.ui.ShelfStore
+import top.linkdown.android.ui.SingleEntry
 import top.linkdown.android.update.AppUpdater
 import top.linkdown.android.update.UpdateInstallFlow
 import top.linkdown.android.update.UpdateOfferDialog
@@ -129,13 +132,16 @@ class MainActivity : ComponentActivity() {
  //（重建/回收无感——技术债已清）；pipeline 直调入口已收编进 queue.enqueue/cancel/retry
         val queue = (application as LinkdownApplication).queue
         val queueState by queue.state.collectAsStateWithLifecycle()
+ // 书架台账（合书数据源；refreshShelf 分组对账 + pipeline 生产写入共用同一单例）
+        val ledger = (application as LinkdownApplication).ledger
  // 设置流观察（设置页渲染真源；即点即存经仓库 setter → 流回传）
         val settingsRepo = (application as LinkdownApplication).settingsRepository
         val settings by remember { settingsRepo.settings }
             .collectAsStateWithLifecycle(initialValue = AppSettings())
         var ui by remember { mutableStateOf(MainUiState()) }
         var screen by remember { mutableStateOf(Screen.HOME) }
-        var shelf by remember { mutableStateOf<List<ShelfItem>>(emptyList()) }
+        var shelf by remember { mutableStateOf<List<ShelfEntry>>(emptyList()) }
+        var readerEntry by remember { mutableStateOf<ShelfEntry?>(null) }
 
  // —— 应用内升级（v1.0.0.4 产品拍板）：每次完全退出后再打开都自动检查（撤原 24h 节流，
  // 用户要求新版不被错过）；进程内至多一次（旋转/回前台不重复，startupUpdateCheckDone 承载）；
@@ -179,11 +185,19 @@ class MainActivity : ComponentActivity() {
 
         fun log(line: String) { ui = ui.copy(logLines = ui.logLines + "[${ts.format(Date())}] $line") }
         fun refreshShelf() {
-            scope.launch(Dispatchers.IO) { shelf = ShelfStore.query(applicationContext) }
+            scope.launch(Dispatchers.IO) {
+                runCatching {
+                    val items = ShelfStore.query(applicationContext)
+                    val result = ShelfStore.groupShelf(ShelfStore.toKeys(items), ledger.load())
+                    runCatching { ledger.removeKeys(result.staleKeys) }
+                    shelf = ShelfStore.assemble(items, result)
+                }.onFailure { runCatching { android.util.Log.w("ShelfShelf", "书架刷新失败: ${it.message}") } }
+            }
         }
 
         BackHandler(enabled = screen == Screen.SHELF) { screen = Screen.HOME }
         BackHandler(enabled = screen == Screen.SETTINGS) { screen = Screen.HOME }
+        BackHandler(enabled = readerEntry != null) { readerEntry = null }
 
         LifecycleResumeEffect(Unit) {
  // 设计：回前台检测剪贴板为已知平台 URL → 绿 chip（取代早期的直接预填）；
@@ -342,7 +356,12 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onOpenShelf = { screen = Screen.SHELF },
-                onPlayShelfItem = { item -> ShelfStore.play(applicationContext, item) },
+                onOpenShelfEntry = { entry ->
+                    when (entry) {
+                        is BoundEntry -> readerEntry = entry
+                        is SingleEntry -> ShelfStore.play(applicationContext, entry.item)
+                    }
+                },
                 onOpenSettings = { screen = Screen.SETTINGS },
                 modifier = screenModifier,
             )
@@ -360,33 +379,49 @@ class MainActivity : ComponentActivity() {
                 var shelfBoardMode by remember { mutableStateOf(true) }
                 LaunchedEffect(Unit) { shelfBoardMode = settingsRepo.isShelfBoardMode() }
                 ShelfScreen(
-                items = shelf,
+                entries = shelf,
                 shelfBoardMode = shelfBoardMode,
                 onToggleShelfBoardMode = {
                     shelfBoardMode = !shelfBoardMode
                     scope.launch { settingsRepo.setShelfBoardMode(shelfBoardMode) }
                 },
-                onPlay = { item -> ShelfStore.play(applicationContext, item) },
-                onDelete = { item ->
-                    scope.launch(Dispatchers.IO) {
-                        val ok = ShelfStore.delete(applicationContext, item)
-                        if (ok) shelf = ShelfStore.query(applicationContext)
-                        log(if (ok) "已下架：${item.name}" else "下架失败：${item.name}")
+                onOpen = { entry ->
+                    when (entry) {
+                        is BoundEntry -> readerEntry = entry
+                        is SingleEntry -> ShelfStore.play(applicationContext, entry.item)
                     }
                 },
-                onBatchDelete = { items ->
+                onDelete = { entry ->
                     scope.launch(Dispatchers.IO) {
                         var ok = 0
                         val failedNames = mutableListOf<String>()
-                        items.forEach { item ->
-                            if (ShelfStore.delete(applicationContext, item)) ok++ else failedNames += item.name
+                        entry.pages.forEach { p ->
+                            if (ShelfStore.delete(applicationContext, p)) ok++ else failedNames += p.name
                         }
-                        shelf = ShelfStore.query(applicationContext)
+                        refreshShelf()
                         log(
                             when {
-                                failedNames.isEmpty() -> "批量下架完成：${ok} 件"
-                                else -> "批量下架：${ok} 件成功，失败：${failedNames.joinToString("、")}"
+                                failedNames.isEmpty() -> "已下架：${entry.title}（${entry.pages.size} 个文件）"
+                                else -> "下架失败：${failedNames.joinToString("、")}"
+                            },
+                        )
+                    }
+                },
+                onBatchDelete = { entries ->
+                    scope.launch(Dispatchers.IO) {
+                        var ok = 0
+                        val failedNames = mutableListOf<String>()
+                        entries.forEach { entry ->
+                            entry.pages.forEach { p ->
+                                if (ShelfStore.delete(applicationContext, p)) ok++ else failedNames += p.name
                             }
+                        }
+                        refreshShelf()
+                        log(
+                            when {
+                                failedNames.isEmpty() -> "批量下架完成：${entries.size} 件"
+                                else -> "批量下架：${entries.size} 件中失败：${failedNames.joinToString("、")}"
+                            },
                         )
                     }
                 },
@@ -394,6 +429,16 @@ class MainActivity : ComponentActivity() {
                 modifier = screenModifier,
                 )
             }
+        }
+
+ // 作品阅读器覆盖层（设计 §8）：z 序在 when(screen) 之后——根级兄弟后画者在上，
+ // 放前面会被主界面盖住（不可见）；Bound 单击进阅读器（书架+主页出货区）
+        readerEntry?.let { entry ->
+            BookReader(
+                entry = entry,
+                onDismiss = { readerEntry = null },
+                onPlayPage = { page -> ShelfStore.play(applicationContext, page) },
+            )
         }
 
  // 首启用户协议（开源合规）：必须显式选择——同意置旗标永不再弹；不同意=退出应用。点外不关闭。

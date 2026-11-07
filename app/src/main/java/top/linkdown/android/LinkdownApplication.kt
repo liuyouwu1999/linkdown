@@ -12,6 +12,7 @@ import top.linkdown.android.queue.QueuePersistence
 import top.linkdown.android.service.DownloadService
 import top.linkdown.android.settings.AppSettings
 import top.linkdown.android.settings.SettingsRepository
+import top.linkdown.android.ui.ShelfLedger
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -38,12 +39,19 @@ class LinkdownApplication : Application() {
  /** 设置内存快照：设置流回写（provider 缝为非挂起 lambda，现读此值；默认值=空存储首读一致）。 */
     private val settingsCache = MutableStateFlow(AppSettings())
 
+    /** 书架台账（作品键→文件清单；书架合书数据源，与队列持久化同款 DataStore 形态）。 */
+    val ledger: ShelfLedger by lazy {
+        ShelfLedger.create(File(filesDir, "datastore/shelf_ledger.preferences_pb"), appScope)
+    }
+
  /** 下载管道（队列 runner 与 入口枚举缝共用同一 env/画质档装配）。 */
     val pipeline: SingleDownloadPipeline by lazy {
-        SingleDownloadPipeline(
-            AndroidPipelineEnv(this),
-            qualityProvider = { settingsCache.value.quality },
-        )
+        val env = AndroidPipelineEnv(this)
+        env.ledgerMerge = { merge ->
+            runCatching { ledger.merge(merge) }
+                .onFailure { runCatching { android.util.Log.w("ShelfLedger", "台账写入失败: workKey=${merge.workKey}", it) } }
+        }
+        SingleDownloadPipeline(env, qualityProvider = { settingsCache.value.quality })
     }
 
  /** 队列与进程同生命周期；scope 取消即进程死亡（持久化保证恢复）。 */

@@ -77,24 +77,24 @@ import androidx.compose.ui.unit.sp
  */
 @Composable
 fun ShelfScreen(
-    items: List<ShelfItem>,
-    onPlay: (ShelfItem) -> Unit,
-    onDelete: (ShelfItem) -> Unit,
-    onBatchDelete: (List<ShelfItem>) -> Unit,
+    entries: List<ShelfEntry>,
+    onOpen: (ShelfEntry) -> Unit,
+    onDelete: (ShelfEntry) -> Unit,
+    onBatchDelete: (List<ShelfEntry>) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     shelfBoardMode: Boolean = false,
     onToggleShelfBoardMode: () -> Unit = {},
 ) {
     val c = PixelTheme.colors
-    var pendingDelete by remember { mutableStateOf<ShelfItem?>(null) }
+    var pendingDelete by remember { mutableStateOf<ShelfEntry?>(null) }
     var sortMode by remember { mutableStateOf(ShelfSort.TIME) }
-    val sortedItems = remember(items, sortMode) { sortShelfItems(items, sortMode) }
+    val sortedEntries = remember(entries, sortMode) { sortShelfEntries(entries, sortMode) }
  // —— 多选批量下架（长按书/行进入；下架=删文件，故批量也有确认框）——
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(emptySet<String>()) }
     var confirmBatch by remember { mutableStateOf(false) }
-    val selectedItems = sortedItems.filter { it.uri.toString() in selected }
+    val selectedItems = sortedEntries.filter { it.id in selected }
     Column(modifier = modifier.fillMaxSize().background(c.background)) {
  // 细棚条（同主页遮阳棚，矮版 10dp 含 3dp 底缘）
         Box(
@@ -142,7 +142,7 @@ fun ShelfScreen(
                     .padding(horizontal = 4.dp, vertical = 6.dp),
             )
             Spacer(Modifier.weight(1f))
-            Text("货架 · 全部 ${items.size} 件", color = c.awningCream, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("货架 · 全部 ${entries.size} 件", color = c.awningCream, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             if (selecting) {
  // 多选态：排序/切换退位给「取 消」（选择态下点书/行只做勾选）
@@ -171,13 +171,13 @@ fun ShelfScreen(
         Column(Modifier.fillMaxWidth().weight(1f)) {
             if (shelfBoardMode) {
                 ShelfBoard(
-                    sortedItems, onPlay = onPlay,
+                    sortedEntries, onOpen = onOpen,
                     selecting = selecting,
-                    isSelected = { it.uri.toString() in selected },
-                    onToggle = { item -> selected = if (item.uri.toString() in selected) selected - item.uri.toString() else selected + item.uri.toString() },
-                    onEnterSelection = { item -> selecting = true; selected = selected + item.uri.toString() },
+                    isSelected = { it.id in selected },
+                    onToggle = { entry -> selected = if (entry.id in selected) selected - entry.id else selected + entry.id },
+                    onEnterSelection = { entry -> selecting = true; selected = selected + entry.id },
                 )
-            } else if (items.isEmpty()) {
+            } else if (entries.isEmpty()) {
  // 空态（列表模式；书架模式的空柜仍带整面架子，见 ShelfBoard）
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -194,13 +194,13 @@ fun ShelfScreen(
                     modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 16.dp),
                 ) {
-                    items(sortedItems) { item ->
+                    items(sortedEntries) { entry ->
                         ShelfRow(
-                            item, onPlay = onPlay, onDelete = { pendingDelete = item },
+                            entry, onOpen = onOpen, onDelete = { pendingDelete = entry },
                             selecting = selecting,
-                            selected = item.uri.toString() in selected,
-                            onToggle = { selected = if (item.uri.toString() in selected) selected - item.uri.toString() else selected + item.uri.toString() },
-                            onEnterSelection = { selecting = true; selected = selected + item.uri.toString() },
+                            selected = entry.id in selected,
+                            onToggle = { selected = if (entry.id in selected) selected - entry.id else selected + entry.id },
+                            onEnterSelection = { selecting = true; selected = selected + entry.id },
                         )
                     }
                 }
@@ -222,7 +222,7 @@ fun ShelfScreen(
                 Spacer(Modifier.weight(1f))
                 ShelfPixelButton(
                     "全 选", container = Color(0xFFC9731E), fontSize = 12.sp, height = 30.dp,
-                    onClick = { selected = sortedItems.map { it.uri.toString() }.toSet() },
+                    onClick = { selected = sortedEntries.map { it.id }.toSet() },
                     modifier = Modifier.width(64.dp),
                 )
                 Spacer(Modifier.width(6.dp))
@@ -241,12 +241,15 @@ fun ShelfScreen(
             }
         }
     }
-    pendingDelete?.let { item ->
+    pendingDelete?.let { entry ->
         PixelConfirmDialog(
             title = "下架这件货？",
-            message = "「${item.name}」将从下载目录删除，不可恢复。",
+            message = when (entry) {
+                is BoundEntry -> "「${entry.title}」将从下载目录删除 ${entry.pages.size} 个文件，不可恢复。"
+                is SingleEntry -> "「${entry.item.name}」将从下载目录删除，不可恢复。"
+            },
             confirmText = "删 除",
-            onConfirm = { onDelete(item); pendingDelete = null },
+            onConfirm = { onDelete(entry); pendingDelete = null },
             onDismiss = { pendingDelete = null },
         )
     }
@@ -290,6 +293,46 @@ internal fun shelfSortedIndices(names: List<String>, kinds: List<ShelfKind>, mod
 /** 排序纯函数：TIME=入库原序（MediaStore 日期倒序） */
 fun sortShelfItems(items: List<ShelfItem>, mode: ShelfSort): List<ShelfItem> =
     shelfSortedIndices(items.map { it.name }, items.map { it.kind }, mode).map { items[it] }
+
+/**
+ * 分组排序核心（JVM 直测，键序列投影——Bound.dateAdded=max(pages)、Bound 类别键=min(kind.ordinal)，
+ * 与 shelfSortedIndices 同款 Uri 无关手法）。
+ */
+internal fun shelfEntrySortedIndices(titles: List<String>, kindOrdinals: List<Int>, dates: List<Long>, mode: ShelfSort): List<Int> =
+    when (mode) {
+        ShelfSort.TIME -> titles.indices.toList() // groupShelf 输出已 dateAdded DESC
+        ShelfSort.NAME -> titles.indices.sortedBy { titles[it].lowercase() }
+        ShelfSort.KIND -> titles.indices.sortedWith(compareBy({ kindOrdinals[it] }, { titles[it].lowercase() }))
+    }
+
+/**
+ * 信息条摘要（JVM 直测；实况按文件名 .MP.jpg 识别——kindOf 判 IMAGE 推不出；实况计入 N 图）。
+ * 纯视频组合不打「含视频」标签（测试「纯视频无标签」）——视频是本应用主导内容，单独成书时标签冗余。
+ */
+internal fun pagesSummary(names: List<String>, kinds: List<ShelfKind>): String {
+    val tags = buildList {
+        if (names.any { it.endsWith(".MP.jpg", ignoreCase = true) }) add("含实况")
+        if (kinds.any { it == ShelfKind.VIDEO } && kinds.any { it != ShelfKind.VIDEO }) add("含视频")
+        if (kinds.any { it == ShelfKind.AUDIO }) add("含音频")
+        val images = kinds.count { it == ShelfKind.IMAGE }
+        if (images > 0) add("$images 图")
+    }
+    return (listOf("${names.size} 页") + tags).joinToString(" · ")
+}
+
+/**
+ * UI 层装配排序（entries 含 Uri 不可 JVM 构造，纯逻辑在 shelfEntrySortedIndices）。
+ * 三键提取约定（实现者照抄，勿自创）：title=entry.title；
+ * 类别键=组内最高优先级 kind 的 ordinal（min——VIDEO(0) 最优，音频+封面书归音频类，规格 §10）；
+ * dateAdded=entry.dateAdded（Bound=max(pages)，模型已派生）。
+ */
+fun sortShelfEntries(entries: List<ShelfEntry>, mode: ShelfSort): List<ShelfEntry> =
+    shelfEntrySortedIndices(
+        entries.map { it.title },
+        entries.map { e -> e.pages.minOf { it.kind.ordinal } },
+        entries.map { it.dateAdded },
+        mode,
+    ).map { entries[it] }
 
 /**
  * 书架页专用像素按钮（参考图工具栏风格）：小圆角 + 深描边 + 顶部内亮边 + 右下硬投影，按下下沉。
@@ -351,9 +394,9 @@ private fun ShelfPixelButton(
 
 @Composable
 private fun ShelfRow(
-    item: ShelfItem,
-    onPlay: (ShelfItem) -> Unit,
-    onDelete: (ShelfItem) -> Unit,
+    entry: ShelfEntry,
+    onOpen: (ShelfEntry) -> Unit,
+    onDelete: (ShelfEntry) -> Unit,
     selecting: Boolean,
     selected: Boolean,
     onToggle: () -> Unit,
@@ -361,13 +404,14 @@ private fun ShelfRow(
 ) {
     val c = PixelTheme.colors
     val shape = RoundedCornerShape(8.dp)
-    val blockColor = when (item.kind) {
+    val rowKind = entry.pages.minBy { it.kind.ordinal }.kind
+    val blockColor = when (rowKind) {
         ShelfKind.VIDEO -> c.primary
         ShelfKind.AUDIO -> c.success
         ShelfKind.IMAGE -> c.gold
         ShelfKind.OTHER -> c.inset
     }
-    val blockIcon = when (item.kind) {
+    val blockIcon = when (rowKind) {
         ShelfKind.VIDEO -> Sprites.CAMERA
         ShelfKind.AUDIO -> Sprites.NOTE
         ShelfKind.IMAGE -> Sprites.IMAGE
@@ -379,9 +423,9 @@ private fun ShelfRow(
             .fillMaxWidth()
             .background(c.surface, shape)
             .border(if (selected) 3.dp else 2.dp, if (selected) c.primary else c.outline, shape)
-            .pointerInput(item.uri, selecting) {
+            .pointerInput(entry.id, selecting) {
                 detectTapGestures(
-                    onTap = { if (selecting) onToggle() else onPlay(item) },
+                    onTap = { if (selecting) onToggle() else onOpen(entry) },
                     onLongPress = { if (!selecting) onEnterSelection() },
                 )
             }
@@ -412,8 +456,14 @@ private fun ShelfRow(
         }
         Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
-            Text(item.name, color = c.textPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${item.platform} · ${formatSize(item.sizeBytes)}", color = c.textSecondary, fontSize = 11.sp)
+            Text(
+                when (entry) {
+                    is BoundEntry -> "${entry.title} (${entry.pages.size} 个文件)"
+                    is SingleEntry -> entry.item.name
+                },
+                color = c.textPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text("${entry.platform} · ${formatSize(entry.sizeBytes)}", color = c.textSecondary, fontSize = 11.sp)
         }
         Spacer(Modifier.width(8.dp))
  // 多选态隐藏 ▶/🗑（点行即勾选；单条删除走批量流或退出多选后用 🗑）
@@ -424,7 +474,7 @@ private fun ShelfRow(
                 Modifier
                     .background(c.primary, playShape)
                     .border(2.dp, c.outline, playShape)
-                    .clickable(remember { MutableInteractionSource() }, indication = null) { onPlay(item) }
+                    .clickable(remember { MutableInteractionSource() }, indication = null) { onOpen(entry) }
                     .padding(horizontal = 9.dp, vertical = 6.dp),
             ) {
                 PixelIcon(Sprites.PLAY, c.onPrimary, iconSize = 12.dp)
@@ -436,7 +486,7 @@ private fun ShelfRow(
                 Modifier
                     .background(c.error, trashShape)
                     .border(2.dp, c.outline, trashShape)
-                    .clickable(remember { MutableInteractionSource() }, indication = null) { onDelete(item) }
+                    .clickable(remember { MutableInteractionSource() }, indication = null) { onDelete(entry) }
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 PixelIcon(Sprites.TRASH, c.onPrimary, iconSize = 12.dp)
@@ -526,16 +576,16 @@ private object Cabinet {
  */
 @Composable
 private fun ShelfBoard(
-    shelfItems: List<ShelfItem>,
-    onPlay: (ShelfItem) -> Unit,
+    entries: List<ShelfEntry>,
+    onOpen: (ShelfEntry) -> Unit,
     selecting: Boolean,
-    isSelected: (ShelfItem) -> Boolean,
-    onToggle: (ShelfItem) -> Unit,
-    onEnterSelection: (ShelfItem) -> Unit,
+    isSelected: (ShelfEntry) -> Boolean,
+    onToggle: (ShelfEntry) -> Unit,
+    onEnterSelection: (ShelfEntry) -> Unit,
 ) {
     val perPage = SHELF_PAGE_ROWS * BOOKS_PER_ROW
-    val pages = remember(shelfItems) {
-        if (shelfItems.isEmpty()) listOf(emptyList()) else shelfItems.chunked(perPage)
+    val pages = remember(entries) {
+        if (entries.isEmpty()) listOf(emptyList()) else entries.chunked(perPage)
     }
     var page by remember { mutableStateOf(0) }
     LaunchedEffect(pages.size) { if (page >= pages.size) page = 0 }
@@ -596,14 +646,14 @@ private fun ShelfBoard(
                     val filledRows = rows.size
                     repeat(SHELF_PAGE_ROWS) { r ->
                         val sign = when {
-                            shelfItems.isEmpty() && r == 0 -> "书架还是空的" to "下载的内容会陈列在这里"
+                            entries.isEmpty() && r == 0 -> "书架还是空的" to "下载的内容会陈列在这里"
                             r == filledRows && rows.getOrElse(r) { emptyList() }.isEmpty() ->
                                 "空 架" to "下载的内容会摆到这一层"
                             else -> null
                         }
                     ShelfPlankRow(
-                        rowItems = rows.getOrElse(r) { emptyList() },
-                        all = shelfItems,
+                        rowEntries = rows.getOrElse(r) { emptyList() },
+                        all = entries.flatMap { it.pages },
                         colorStart = p * perPage + r * BOOKS_PER_ROW,
                         rowHeight = rowH,
                         rowWidth = rowUsableWidth,
@@ -614,7 +664,7 @@ private fun ShelfBoard(
                         isSelected = isSelected,
                         onToggle = onToggle,
                         onEnterSelection = onEnterSelection,
-                        onPlay = onPlay,
+                        onOpen = onOpen,
                     )
                     }
                 }
@@ -660,7 +710,7 @@ private fun ShelfBoard(
  */
 @Composable
 private fun ShelfPlankRow(
-    rowItems: List<ShelfItem>,
+    rowEntries: List<ShelfEntry>,
     all: List<ShelfItem>,
     colorStart: Int,
     rowHeight: Dp,
@@ -669,18 +719,18 @@ private fun ShelfPlankRow(
     bookHeight: Dp,
     emptySign: Pair<String, String>? = null,
     selecting: Boolean,
-    isSelected: (ShelfItem) -> Boolean,
-    onToggle: (ShelfItem) -> Unit,
-    onEnterSelection: (ShelfItem) -> Unit,
-    onPlay: (ShelfItem) -> Unit,
+    isSelected: (ShelfEntry) -> Boolean,
+    onToggle: (ShelfEntry) -> Unit,
+    onEnterSelection: (ShelfEntry) -> Unit,
+    onOpen: (ShelfEntry) -> Unit,
 ) {
-    val spreadGap = bookRowGap(rowItems.size, rowWidth, bookWidth)
+    val spreadGap = bookRowGap(rowEntries.size, rowWidth, bookWidth)
     Box(
         Modifier
             .fillMaxWidth()
             .height(rowHeight),
     ) {
-        if (rowItems.isEmpty() && emptySign != null) {
+        if (rowEntries.isEmpty() && emptySign != null) {
             EmptyShelfSign(
                 title = emptySign.first,
                 subtitle = emptySign.second,
@@ -702,18 +752,18 @@ private fun ShelfPlankRow(
             horizontalArrangement = Arrangement.spacedBy(spreadGap),
             verticalAlignment = Alignment.Bottom,
         ) {
-            rowItems.forEachIndexed { i, item ->
+            rowEntries.forEachIndexed { i, entry ->
                 BookCell(
-                    item = item,
+                    entry = entry,
                     all = all,
                     colorIndex = colorStart + i,
                     bookWidth = bookWidth,
                     bookHeight = bookHeight,
                     selecting = selecting,
-                    selected = isSelected(item),
-                    onToggle = { onToggle(item) },
-                    onEnterSelection = { onEnterSelection(item) },
-                    onPlay = onPlay,
+                    selected = isSelected(entry),
+                    onToggle = { onToggle(entry) },
+                    onEnterSelection = { onEnterSelection(entry) },
+                    onOpen = onOpen,
                 )
             }
         }
@@ -808,7 +858,7 @@ private val coverVividFilter: ColorFilter = ColorFilter.colorMatrix(
  */
 @Composable
 private fun BookCell(
-    item: ShelfItem,
+    entry: ShelfEntry,
     all: List<ShelfItem>,
     colorIndex: Int,
     bookWidth: Dp,
@@ -817,16 +867,16 @@ private fun BookCell(
     selected: Boolean,
     onToggle: () -> Unit,
     onEnterSelection: () -> Unit,
-    onPlay: (ShelfItem) -> Unit,
+    onOpen: (ShelfEntry) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var cover by remember(item.uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    LaunchedEffect(item.uri) {
+    var cover by remember(entry.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(entry.id) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            cover = loadCover(context, item, all)?.let { pixelateCover(it, 88) }
+            cover = ShelfStore.loadEntryCover(context, entry, all)?.let { pixelateCover(it, 88) }
         }
     }
-    val playLatest by rememberUpdatedState(onPlay)
+    val openLatest by rememberUpdatedState(onOpen)
     val palette = shelfBookPalettes[colorIndex.mod(shelfBookPalettes.size)]
  // 斜投影进深：整盒向左上“退进去”d×rise（rise = d/2，像素风斜角）；竖边保持垂直，书站直
     val depthX = (bookWidth * 0.18f).coerceAtLeast(14.dp)
@@ -834,11 +884,14 @@ private fun BookCell(
     val frontW = bookWidth - depthX
     val frontH = bookHeight - rise
     val spineContentW = 14.dp
-    val title = item.name
-        .substringBeforeLast('.')
-        .replace(Regex("[【】\\[\\]()（）]"), " ")
-        .trim()
-        .ifBlank { "未命名内容" }
+    val title = when (entry) {
+        is BoundEntry -> entry.title
+        is SingleEntry -> entry.item.name
+            .substringBeforeLast('.')
+            .replace(Regex("[【】\\[\\]()（）]"), " ")
+            .trim()
+            .ifBlank { "未命名内容" }
+    }
     Box(
         Modifier
             .width(bookWidth)
@@ -943,9 +996,9 @@ private fun BookCell(
                     ),
                 )
             }
-            .pointerInput(item.uri, selecting) {
+            .pointerInput(entry.id, selecting) {
                 detectTapGestures(
-                    onTap = { if (selecting) onToggle() else playLatest(item) },
+                    onTap = { if (selecting) onToggle() else openLatest(entry) },
                     onLongPress = { if (!selecting) onEnterSelection() },
                 )
             },
@@ -1026,7 +1079,7 @@ private fun BookCell(
                     if (bmp != null) {
                         Image(
                             bitmap = bmp.asImageBitmap(),
-                            contentDescription = item.name,
+                            contentDescription = entry.title,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.FillBounds,
                             filterQuality = FilterQuality.None,
@@ -1039,7 +1092,7 @@ private fun BookCell(
                                 .background(palette.main.copy(alpha = 0.08f)),
                         )
                     } else {
-                        PixelCoverPlaceholder(kind = item.kind, palette = palette)
+                        PixelCoverPlaceholder(kind = entry.pages.minBy { it.kind.ordinal }.kind, palette = palette)
                     }
                     Box(
                         Modifier
@@ -1090,13 +1143,33 @@ private fun BookCell(
                     PixelIcon(Sprites.PLAY, Cabinet.cream, iconSize = 6.dp)
                     Spacer(Modifier.width(3.dp))
                     Text(
-                        text = "${kindLabelZh(item)} · ${item.platform.ifBlank { "本地" }}",
+                        text = when (entry) {
+                            is BoundEntry -> {
+                                val summary = pagesSummary(entry.pages.map { it.name }, entry.pages.map { it.kind })
+                                "${entry.platform} · $summary"
+                            }
+                            is SingleEntry -> "${kindLabelZh(entry.item)} · ${entry.item.platform.ifBlank { "本地" }}"
+                        },
                         color = Cabinet.cream,
                         fontSize = 7.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
+                    )
+                }
+ // 合书角标（浮条一隅叠 ×N；摘要过宽被省略可接受，优先保角标可见）
+                if (entry is BoundEntry) {
+                    Text(
+                        text = "×${entry.pages.size}",
+                        color = Cabinet.cream,
+                        fontSize = 7.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 3.dp),
                     )
                 }
             }

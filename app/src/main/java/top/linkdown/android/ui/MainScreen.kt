@@ -99,7 +99,7 @@ private val queueVisibleStates =
 fun MainScreen(
     state: MainUiState,
     queue: QueueUiState,
-    shelf: List<ShelfItem>,
+    shelf: List<ShelfEntry>,
     onUrlChange: (String) -> Unit,
     onModeChange: (DownloadModes) -> Unit,
     onSessExpandedChange: (Boolean) -> Unit,
@@ -117,7 +117,7 @@ fun MainScreen(
     onTogglePaused: () -> Unit,
     onImportClipboard: () -> Unit,
     onOpenShelf: () -> Unit,
-    onPlayShelfItem: (ShelfItem) -> Unit,
+    onOpenShelfEntry: (ShelfEntry) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -218,7 +218,7 @@ fun MainScreen(
                     Text("全部 >", color = c.darkBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(6.dp))
-                ShipmentArea(shelf.take(3), onPlayShelfItem)
+                ShipmentArea(shelf.take(3), onOpenShelfEntry)
             }
             if (state.logLines.isNotEmpty()) {
                 Spacer(Modifier.height(11.dp))
@@ -586,7 +586,7 @@ private fun QueueCard(
 
 /** 深棕 #4A3B2A 圆角区，内嵌奶白小卡：▶ 标题 · 大小 — 平台名红字（设计）；空态「今日还没开张」 */
 @Composable
-private fun ShipmentArea(recent: List<ShelfItem>, onPlay: (ShelfItem) -> Unit) {
+private fun ShipmentArea(recent: List<ShelfEntry>, onOpen: (ShelfEntry) -> Unit) {
     val c = PixelTheme.colors
     val regionShape = RoundedCornerShape(8.dp)
     Box(
@@ -605,24 +605,30 @@ private fun ShipmentArea(recent: List<ShelfItem>, onPlay: (ShelfItem) -> Unit) {
             )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                recent.forEach { item ->
+                recent.forEach { entry ->
                     val cardShape = RoundedCornerShape(5.dp)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(c.surface, cardShape)
-                            .clickable(remember { MutableInteractionSource() }, indication = null) { onPlay(item) }
+                            .clickable(remember { MutableInteractionSource() }, indication = null) { onOpen(entry) }
                             .padding(horizontal = 7.dp, vertical = 5.dp),
                     ) {
                         PixelIcon(Sprites.PLAY, c.primary, iconSize = 9.dp)
                         Spacer(Modifier.width(6.dp))
-                        Text(item.name, color = c.textPrimary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false))
+                        Text(
+                            when (entry) {
+                                is BoundEntry -> entry.title
+                                is SingleEntry -> entry.item.name
+                            },
+                            color = c.textPrimary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
                         Spacer(Modifier.width(5.dp))
-                        Text("· ${formatSize(item.sizeBytes)}", color = c.textSecondary, fontSize = 11.sp)
+                        Text("· ${formatSize(entry.sizeBytes)}", color = c.textSecondary, fontSize = 11.sp)
                         Spacer(Modifier.weight(1f))
-                        Text(item.platform, color = c.error, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(entry.platform, color = c.error, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

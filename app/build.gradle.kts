@@ -12,8 +12,8 @@ android {
         applicationId = "top.linkdown.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 11
-        versionName = "1.0.0.10"
+        versionCode = 12
+        versionName = "1.0.0.11"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += "arm64-v8a"

@@ -13,6 +13,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import top.linkdown.android.engine.BatchInfo
+import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.pipeline.DownloadModes
 import top.linkdown.android.queue.QueueItem
 import top.linkdown.android.queue.QueueState
@@ -41,6 +42,9 @@ import top.linkdown.android.queue.QueueUiState
 class MainScreenTest {
     @get:Rule val rule = createComposeRule()
 
+    /** 弹窗 probe 缝的空实现（本页用例 URL 不走开窗判型 Sniffing，不触达；仅补签名）。 */
+    private val PROBE_INFO_DUMMY = ProbeInfo("", "", "", "", "", null, null, false, null, false)
+
     private fun qItem(
         state: QueueState,
         id: String = "run-1",
@@ -62,7 +66,7 @@ class MainScreenTest {
         clipboardUrl: String? = null,
         sessExpanded: Boolean = false,
         hasCookie: Map<String, Boolean> = emptyMap(),
-        shelf: List<ShelfItem> = emptyList(),
+        shelf: List<ShelfEntry> = emptyList(),
         onStart: () -> Unit = {}, // M3.5 起 MainScreen.onStart=(modes,url)，harness 转发吞参
         onModeChange: (DownloadModes) -> Unit = {},
         onTogglePaused: () -> Unit = {},
@@ -79,12 +83,15 @@ class MainScreenTest {
                     queue = queue,
                     shelf = shelf,
                     onUrlChange = {}, onModeChange = onModeChange, onSessExpandedChange = {}, onSessChange = {},
+                    onSaveSess = {},
                     onOpenLoginHub = onOpenLoginHub,
-                    onStart = { _, _ -> onStart() }, onCancel = {}, onRetry = {}, onTogglePaused = onTogglePaused,
-                    onImportClipboard = onImportClipboard, onOpenShelf = {}, onPlayShelfItem = {},
+                    onStart = { _, _, _ -> onStart() }, onCancel = {}, onRetry = {}, onTogglePaused = onTogglePaused,
+                    onImportClipboard = onImportClipboard, onOpenShelf = {}, onOpenShelfEntry = {},
                     onOpenSettings = {},
                     onEnqueueGroup = { _, _, _, _ -> }, // M3.5 批量入口（本页用例不触达）
                     enumerateBatch = { BatchInfo("", emptyList(), 0) }, // M3.5 入口枚举缝（不触达）
+                    probeFor = { PROBE_INFO_DUMMY }, // 弹窗开窗判型缝（本页用例 URL 不走 Sniffing，不触达）
+                    onDeleteQueueItem = {}, onDeleteQueueItems = {},
                 )
             }
         }
@@ -186,9 +193,10 @@ class MainScreenTest {
                     queue = QueueUiState(items = emptyList(), paused = false),
                     shelf = emptyList(),
                     onUrlChange = { url.value = it }, onModeChange = {}, onSessExpandedChange = {},
-                    onSessChange = {}, onOpenLoginHub = {}, onStart = { _, _ -> }, onCancel = {}, onRetry = {},
-                    onTogglePaused = {}, onImportClipboard = {}, onOpenShelf = {}, onPlayShelfItem = {},
+                    onSessChange = {}, onSaveSess = {}, onOpenLoginHub = {}, onStart = { _, _, _ -> }, onCancel = {}, onRetry = {},
+                    onTogglePaused = {}, onImportClipboard = {}, onOpenShelf = {}, onOpenShelfEntry = {},
                     onOpenSettings = {}, onEnqueueGroup = { _, _, _, _ -> }, enumerateBatch = { BatchInfo("", emptyList(), 0) },
+                    probeFor = { PROBE_INFO_DUMMY }, onDeleteQueueItem = {}, onDeleteQueueItems = {},
                 )
             }
         }
@@ -276,8 +284,17 @@ class MainScreenTest {
     }
 
     @Test fun shipment_area_shows_count_and_items() {
-        val item = ShelfItem(Uri.EMPTY, "某视频.mp4", "哔哩哔哩", 128L shl 20, ShelfKind.VIDEO, 1L)
-        set(shelf = listOf(item))
+ // 换型：ShelfItem 补 relPath 具名构造；货架 fixture 以条目（SingleEntry）为单位
+        val item = ShelfItem(
+            uri = Uri.EMPTY,
+            name = "某视频.mp4",
+            relPath = "Download/链接下载/哔哩哔哩/",
+            platform = "哔哩哔哩",
+            sizeBytes = 128L shl 20,
+            kind = ShelfKind.VIDEO,
+            dateAdded = 1L,
+        )
+        set(shelf = listOf(SingleEntry(item)))
         rule.onNodeWithText("今日出货 1 件").assertExists()
         rule.onNodeWithText("哔哩哔哩").assertExists()
     }

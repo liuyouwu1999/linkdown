@@ -20,6 +20,7 @@ import top.linkdown.android.engine.MediaEngine
 import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.Mode
 import top.linkdown.android.engine.QishuiEngine
+import top.linkdown.android.ingest.IngestedFile
 import top.linkdown.android.ingest.MediaStoreIngest
 import top.linkdown.android.queue.DedupCheck
 import top.linkdown.android.queue.EngineRegistry
@@ -49,11 +50,14 @@ interface PipelineEnv {
  * 其他→null；生产=CookieStore.forUrl，主页登录态兜底）。 */
     fun cookieFile(url: String, sessdata: String?): File?
 
- /** 入库（生产=MediaStoreIngest 拷入 Downloads/链接下载/<platform>/；JVM 假环境返回 null=无框架 Uri）。 */
-    fun ingest(src: File, platform: String, onProgress: (Float) -> Unit): Uri?
+    /** 入库（生产=MediaStoreIngest 拷入 Downloads/链接下载/<platform>/；JVM 假环境 uri=null）。 */
+    fun ingest(src: File, platform: String, onProgress: (Float) -> Unit): IngestedFile?
 
  /** 库判重（ 设计：probe 后查货架命中；生产=DedupCheck+MediaStore 前缀比对，JVM 假环境可控）。 */
     val dedup: DedupCheck
+
+    /** 台账增量合并缝（设计：每模式 ingest 后调用；生产=Application 单例，JVM 假环境记录器）。 */
+    var ledgerMerge: suspend (LedgerMerge) -> Unit
 }
 
 /** 生产环境实现。 */
@@ -67,10 +71,12 @@ class AndroidPipelineEnv(private val context: Context) : PipelineEnv {
     override fun cookieFile(url: String, sessdata: String?): File? =
         CookieStore.forUrl(url, sessdata?.trim()?.takeIf { it.isNotEmpty() }, context.filesDir)
 
-    override fun ingest(src: File, platform: String, onProgress: (Float) -> Unit): Uri =
-        MediaStoreIngest.ingest(context, src, platform, onProgress) // 非空 Uri 协变满足 Uri?
+    override fun ingest(src: File, platform: String, onProgress: (Float) -> Unit): IngestedFile =
+        MediaStoreIngest.ingest(context, src, platform, onProgress)
 
     override val dedup = DedupCheck(MediaStoreShelfQuery(context))
+
+    override var ledgerMerge: suspend (LedgerMerge) -> Unit = {}
 }
 
 /**
@@ -265,10 +271,27 @@ class SingleDownloadPipeline(
                     throw t // 失败/取消：上抛由上位甄别；taskDir 保留（上位负责清理判定），不清理
                 }
                 val newFiles = files.map { it.toFile() }.sortedByDescending { it.length() }
-                for ((i, f) in newFiles.withIndex()) {
-                    hooks.onIngested(label, env.ingest(f, info.platform) { cp ->
-                        setMode(1f, (i + cp) / newFiles.size)
-                    })
+                val ingested = mutableListOf<IngestedFile>()
+                try {
+                    for ((i, f) in newFiles.withIndex()) {
+                        val inf = env.ingest(f, info.platform) { cp ->
+                            setMode(1f, (i + cp) / newFiles.size)
+                        }
+                        if (inf != null) ingested += inf
+                        hooks.onIngested(label, inf?.uri)
+                    }
+                } finally {
+                    // 半程合并：模式中途失败/取消，已入库部分照记台账（少页书）；台账失败不影响下载
+                    if (ingested.isNotEmpty()) {
+                        runCatching {
+                            withContext(kotlinx.coroutines.NonCancellable) {
+                                env.ledgerMerge(
+                                    LedgerMerge(workKeyOf(info), info.platform, info.title,
+                                        ingested.map { FileRef(it.relPath, it.displayName) }),
+                                )
+                            }
+                        }
+                    }
                 }
                 setMode(1f)
                 hooks.onModeCompleted(mode, newFiles) // P0 写侧：completedModes+=mode、持久化、删临时产物
@@ -343,6 +366,15 @@ internal fun classifyDownloadFailure(t: Throwable): PipelineState = when (t) {
     is CancellationException -> throw t
     is EngineException -> PipelineState.Failed(t.message ?: "下载失败")
     else -> PipelineState.Failed(ErrorMapper.humanize(t))
+}
+
+/**
+ * 作品键（设计 §5）：mediaId 非空 → 平台:mediaId；否则 平台:url:<sourceUrl 去 query/fragment/尾斜杠>。
+ * 已知退化：无稳定 mediaId 的引擎短链/带参变体可能同作品不同键（可接受）。
+ */
+internal fun workKeyOf(info: ProbeInfo): String = when {
+    info.mediaId.isNotBlank() -> "${info.platform}:${info.mediaId}"
+    else -> "${info.platform}:url:" + info.sourceUrl.substringBefore('?').substringBefore('#').trimEnd('/')
 }
 
 // 图文/图集模式段文案（ 有什么下什么 ）：音频勾选在 hasImages 时跳过（单勾才报错）；

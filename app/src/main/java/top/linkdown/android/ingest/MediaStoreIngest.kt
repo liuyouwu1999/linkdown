@@ -6,8 +6,11 @@ import android.net.Uri
 import android.provider.MediaStore
 import java.io.File
 
+/** 入库产物：uri=MediaStore 条目（JVM 假件为 null）；displayName/relPath=入库后回查真名（同名冲突自动改名场景）。 */
+data class IngestedFile(val uri: Uri?, val displayName: String, val relPath: String)
+
 object MediaStoreIngest {
-    fun ingest(context: Context, src: File, platformDir: String, onProgress: (Float) -> Unit = {}): Uri {
+    fun ingest(context: Context, src: File, platformDir: String, onProgress: (Float) -> Unit = {}): IngestedFile {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, src.name)
@@ -31,7 +34,22 @@ object MediaStoreIngest {
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
-            return uri
+            // 回查真实名（IS_PENDING 清零后查；查空回退本地名+构造路径，记日志不按失败处理）
+            var displayName = src.name
+            var relPath = "Download/链接下载/$platformDir/"
+            runCatching {
+                resolver.query(
+                    uri,
+                    arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH),
+                    null, null, null,
+                )?.use { cur ->
+                    if (cur.moveToFirst()) {
+                        cur.getString(0)?.takeIf { it.isNotEmpty() }?.let { displayName = it }
+                        cur.getString(1)?.takeIf { it.isNotEmpty() }?.let { relPath = it }
+                    }
+                }
+            }
+            return IngestedFile(uri, displayName, relPath)
         } catch (t: Throwable) {
             resolver.delete(uri, null, null)
             throw t

@@ -1,6 +1,5 @@
 package top.linkdown.android.queue
 
-import android.net.Uri
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import top.linkdown.android.engine.BatchInfo
@@ -11,6 +10,8 @@ import top.linkdown.android.engine.EngineException
 import top.linkdown.android.engine.MediaEngine
 import top.linkdown.android.engine.Mode
 import top.linkdown.android.engine.ProbeInfo
+import top.linkdown.android.ingest.IngestedFile
+import top.linkdown.android.pipeline.LedgerMerge
 import top.linkdown.android.pipeline.PipelineEnv
 import java.io.File
 import java.nio.file.Path
@@ -58,6 +59,7 @@ class FakeEngine(
     var enumerateResult: BatchInfo? = null
     var enumerateError: Throwable? = null
     val runIdsSeen = ArrayList<String>() // probe/download 收到的执行 runId（执行键同步断言，fix round 1）
+    var filesPerMode = 1 // 台账半程合并测试用；默认 1 保持既有 ingested 名单
 
     override suspend fun enumerate(url: String, cookies: File?, runId: String): BatchInfo {
         enumerateCalls += url
@@ -86,8 +88,14 @@ class FakeEngine(
         cookiesSeen += cookies?.readText()
         audioFormatsSeen += audioFormat
         qualitySeen += quality
-        val f = File(taskDir.toFile(), "out-${mode.name.lowercase()}.bin")
-        f.writeText("data-$mode")
+        val paths = (1..filesPerMode).map { idx ->
+            val f = File(
+                taskDir.toFile(),
+                if (filesPerMode == 1) "out-${mode.name.lowercase()}.bin" else "out-${mode.name.lowercase()}-$idx.bin",
+            )
+            f.writeText("data-$mode-$idx")
+            f.toPath()
+        }
         when (val b = behavior[mode]) {
             is FakeBehavior.Fail -> throw b.err
             is FakeBehavior.Hang -> {
@@ -100,7 +108,7 @@ class FakeEngine(
         }
         onProgress(1f, "")
         onLog("[download] $mode done")
-        return listOf(f.toPath())
+        return paths
     }
 }
 
@@ -129,6 +137,9 @@ class FakeNetworkMonitor : NetworkMonitor {
 class FakeEnv(private val root: File) : PipelineEnv {
     val engines = LinkedHashMap<String, FakeEngine>()
     val ingested = ArrayList<Pair<String, String>>() // (platform, fileName)
+    val ledgerMerges = ArrayList<LedgerMerge>()
+    override var ledgerMerge: suspend (LedgerMerge) -> Unit = { ledgerMerges.add(it) }
+    var ingestFailOn: String? = null
     val cookieRequests = ArrayList<String?>()
     val taskDirs = ArrayList<File>()
     val runOrder = ArrayList<String>() // runItem 起跑顺序（engineFor 调用序=派发顺序）
@@ -153,9 +164,10 @@ class FakeEnv(private val root: File) : PipelineEnv {
         }
     }
 
-    override fun ingest(src: File, platform: String, onProgress: (Float) -> Unit): Uri? {
+    override fun ingest(src: File, platform: String, onProgress: (Float) -> Unit): IngestedFile? {
+        if (src.name == ingestFailOn) error("模拟入库失败")
         ingested.add(platform to src.name)
         onProgress(1f)
-        return null // JVM 无 Android 框架：Uri 仅签名占位，队列层不消费其值
+        return IngestedFile(null, src.name, "Download/链接下载/$platform/") // JVM 无框架 Uri
     }
 }

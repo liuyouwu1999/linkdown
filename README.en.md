@@ -46,7 +46,9 @@ Queue:
 Media library:
 
 - Products are archived per platform under the system Downloads folder (`Download/链接下载/<platform>/`), visible to gallery and file managers
-- In-app "shelf" page to play, delete and browse by platform
+- The in-app "Shelf" page displays works instead of loose files: multiple images/files downloaded in one go are grouped into a single book (with an ×N badge); single-file downloads remain one book per file as before
+- Work reader: tap a book to flip through it with horizontal swipes and page indicators; video/audio pages play on tap (live photos are shown as still images — the motion plays in your gallery)
+- Removal works on whole books: removing a book deletes all of its files (the confirmation dialog shows the file count); batch removal counts by book
 - Optional audio transcoding to mp3 / m4a with tags and cover art
 
 Batch:
@@ -71,7 +73,7 @@ The app contains no analytics, ads or tracking SDKs. Only the links you paste ar
 |:---:|:---:|:---:|
 | ![Download queue](screenshots/queue.jpg) | ![Shelf](screenshots/shelf.jpg) | ![Battery guide](screenshots/battery.jpg) |
 
-The shelf page has two view modes: list and a wooden "bookshelf" board view (items displayed by cover on planks; tap to play, long-press to remove):
+The shelf page has two view modes: list and a wooden "bookshelf" board view (items displayed by cover on planks; tap to open — single files play directly, whole books open in the reader; long-press to remove):
 
 | Board view |
 |:---:|
@@ -124,6 +126,7 @@ The software only provides link resolution and file download capabilities; it do
 | Jetpack Compose, DataStore, Lifecycle and other AndroidX libraries | UI and storage | Apache-2.0 |
 | [fusion-pixel-font](https://github.com/TakWolf/fusion-pixel-font) | pixel UI font | SIL OFL 1.1 |
 | [TikTokDownloader](https://github.com/JoeanAmier/TikTokDownloader) (Douyin signing ported from it; original reverse engineering from [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)) | Douyin live-photo signing channel | Apache-2.0 |
+| [XHS_Downloader_Android](https://github.com/NEORUAA/XHS_Downloader_Android) (motion-photo synthesis protocol and byte-layout reference; source commit documented in the test fixtures) | saving live photos as motion photos | AGPL-3.0 |
 
 All components are copyright their respective authors; thanks to the open-source community.
 

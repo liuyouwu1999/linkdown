@@ -18,7 +18,8 @@ class MediaStoreIngestTest {
         val tmp = File(ctx.cacheDir, "ingest-test-${System.currentTimeMillis()}.bin")
         tmp.writeBytes(ByteArray(64 * 1024) { it.toByte() })
         val seen = mutableListOf<Float>()
-        val uri = MediaStoreIngest.ingest(ctx, tmp, "哔哩哔哩") { seen.add(it) }
+ // 入库签名换型：ingest 返回 IngestedFile（uri=MediaStore 条目），断言语义不变
+        val uri = MediaStoreIngest.ingest(ctx, tmp, "哔哩哔哩") { seen.add(it) }.uri!!
         try {
             ctx.contentResolver.query(uri, null, null, null, null)!!.use { c ->
                 c.moveToFirst()
