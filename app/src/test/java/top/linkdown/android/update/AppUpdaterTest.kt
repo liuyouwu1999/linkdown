@@ -146,9 +146,9 @@ class AppUpdaterTest {
     }
 
     @Test fun `检查入参缺省即默认级联源`() {
-        // 防呆：默认源必须是「直连、ghfast.top、gh-proxy.com」的顺序
-        assertEquals("", AppUpdater.SOURCES[0])
+        // 防呆：默认源必须是「gh-proxy.com、ghfast.top、直连」的顺序（机主实测 gh-proxy 最快，2026-11-07 拍板）
+        assertEquals("https://gh-proxy.com", AppUpdater.SOURCES[0])
         assertEquals("https://ghfast.top", AppUpdater.SOURCES[1])
-        assertEquals("https://gh-proxy.com", AppUpdater.SOURCES[2])
+        assertEquals("", AppUpdater.SOURCES[2])
     }
 }

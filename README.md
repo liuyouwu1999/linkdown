@@ -124,7 +124,7 @@ release 构建需自行配置签名（见 `app/build.gradle.kts` 内注释）；
 | Jetpack Compose、DataStore、Lifecycle 及 AndroidX 组件 | UI 与存储基础 | Apache-2.0 |
 | [fusion-pixel-font](https://github.com/TakWolf/fusion-pixel-font) | 界面像素字体 | SIL OFL 1.1 |
 | [TikTokDownloader](https://github.com/JoeanAmier/TikTokDownloader)（抖音签名算法自其移植，原逆向出自 [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)） | 抖音实况签名通道 | Apache-2.0 |
-| [TikTokDownloader](https://github.com/JoeanAmier/TikTokDownloader)（抖音签名算法自其移植，原逆向出自 [Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)） | 抖音实况签名通道 | Apache-2.0 |
+| [XHS_Downloader_Android](https://github.com/NEORUAA/XHS_Downloader_Android)（动态照片合成协议与字节布局参考，来源 commit 见测试资源说明） | 实况照片保存为动态照片 | AGPL-3.0 |
 
 以上组件的版权归各自作者所有，感谢开源社区。
 

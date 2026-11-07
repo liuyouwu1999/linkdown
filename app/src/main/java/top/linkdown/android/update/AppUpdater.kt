@@ -34,9 +34,10 @@ object AppUpdater {
     const val APK_ASSET = "linkdown-arm64.apk"
     const val LATEST_JSON = "latest.json"
 
- /** 更新源级联（顺序=优先级）：直连 → ghfast.top → gh-proxy.com。检查与下载都按序逐个试，
- *  任一成功即止，全挂才报失败——用户零选择（此前让用户挑镜像+失败只有一行小字反馈，体验差）。 */
-    val SOURCES: List<String> = listOf("", "https://ghfast.top", "https://gh-proxy.com")
+ /** 更新源级联（顺序=优先级）：gh-proxy.com → ghfast.top → 直连。检查与下载都按序逐个试，
+ *  任一成功即止，全挂才报失败——用户零选择（此前让用户挑镜像+失败只有一行小字反馈，体验差）。
+ *  镜像优先：机主实测 gh-proxy.com 最快（2026-11-07 拍板设为默认首位），直连 GitHub 留兜底。 */
+    val SOURCES: List<String> = listOf("https://gh-proxy.com", "https://ghfast.top", "")
 
  // 检查用小超时（latest.json 只有几百字节；三源全黑洞最坏 ~45s，有界）；
  // 下载绝无 callTimeout——callTimeout 覆盖整个响应体时长，66MB 在境内慢网必然被掐断（评审 P0）

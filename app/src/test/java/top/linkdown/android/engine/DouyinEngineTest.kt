@@ -130,7 +130,13 @@ class DouyinEngineTest {
     private fun base() = server!!.url("/").toString().trimEnd('/')
 
  /** 参考实现 douyin.py UA=PC → share UA=移动 iPhone 串（参考实现 _UA_MOBILE）。 */
-    private fun engine(): DouyinEngine {
+    private fun engine(
+        // 实况合成缝桩（生产默认=LivePhotoCreator 设备自适应，依赖 android.jar 不可在 JVM 跑）：
+        // 测试默认=确定性拼接假合成（静图+实况字节直拼、恒成功）；用例可换恒败桩测回退
+        liveMux: (File, File, File) -> Boolean = { image, video, output ->
+            output.writeBytes(image.readBytes() + video.readBytes()); true
+        },
+    ): DouyinEngine {
         val sh = tmp.newFile("ffmpeg-stub-${System.nanoTime()}.sh")
         sh.writeText(
             listOf(
@@ -149,6 +155,7 @@ class DouyinEngineTest {
             shareBaseUrl = base(),
             ffmpegPath = sh.absolutePath,
             detailBaseUrl = base(),
+            liveMux = liveMux,
         )
     }
 
@@ -322,7 +329,7 @@ class DouyinEngineTest {
         assertEquals("测试实况标题", info.title)
     }
 
-    @Test fun `download 实况图 video模式 静图实况成对落架`() = runBlocking {
+    @Test fun `download 实况图 video模式 静图合成单文件实况图`() = runBlocking {
         startServer()
         shareForFixture("douyin_router_data_live.json")
         val e = engine()
@@ -330,13 +337,48 @@ class DouyinEngineTest {
         val dir = tmp.newFolder("task-live")
         val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
         assertEquals(
-            "静图+实况成对、静图张只出静图",
+            "实况张=单文件实况图（MP 紧贴扩展名）、静图张只出静图",
+            listOf("测试实况标题-1.MP.jpg", "测试实况标题-2.jpg"),
+            out.map { it.fileName.toString() },
+        )
+        assertTrue(
+            "合成图内容=静图+实况流（假合成拼接）",
+            out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES + LIVE_BYTES),
+        )
+        assertTrue("第 2 张静图内容可辨", out[1].toFile().readBytes().contentEquals(IMAGE2_BYTES))
+    }
+
+    @Test fun `download 实况合成失败 回退静图实况两文件交付`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_live.json")
+        val logs = mutableListOf<String>()
+        val e = engine(liveMux = { _, _, _ -> false })
+        val info = e.probe(shortUrl(), null)
+        val dir = tmp.newFolder("task-live-fallback")
+        val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", { logs += it }, { _, _ -> }, noCancel())
+        assertEquals(
+            "合成失败回退 v1.0.0.8 两文件交付",
             listOf("测试实况标题-1.jpg", "测试实况标题-1-实况.mp4", "测试实况标题-2.jpg"),
             out.map { it.fileName.toString() },
         )
         assertTrue("第 1 张静图内容可辨", out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES))
         assertTrue("实况流内容可辨不串", out[1].toFile().readBytes().contentEquals(LIVE_BYTES))
         assertTrue("第 2 张静图内容可辨", out[2].toFile().readBytes().contentEquals(IMAGE2_BYTES))
+        assertTrue("回退有日志交代", logs.any { it.contains("实况图合成失败") })
+    }
+
+    @Test fun `download 实况合成抛异常 吞掉回退不阻断下载`() = runBlocking {
+        startServer()
+        shareForFixture("douyin_router_data_live.json")
+        val e = engine(liveMux = { _, _, _ -> throw RuntimeException("Stub!") })
+        val info = e.probe(shortUrl(), null)
+        val dir = tmp.newFolder("task-live-throw")
+        val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
+        assertEquals(
+            "异常不穿透、回退两文件",
+            listOf("测试实况标题-1.jpg", "测试实况标题-1-实况.mp4", "测试实况标题-2.jpg"),
+            out.map { it.fileName.toString() },
+        )
     }
 
     @Test fun `probe 图集带占位play_addr 仍按图文交付 有什么下什么`() = runBlocking {
@@ -527,7 +569,7 @@ class DouyinEngineTest {
         assertTrue("签名 UA（Chrome146）", detailReq.contains("Chrome/146.0.0.0"))
     }
 
-    @Test fun `download 图集带实况 cookie 静图实况成对落架`() = runBlocking {
+    @Test fun `download 图集带实况 cookie 逐张合成单文件实况图`() = runBlocking {
         startServer()
         shareForFixture("douyin_router_data_atlas.json")
         val cookieFile = douyinCookieFile(tmp.root)
@@ -536,12 +578,15 @@ class DouyinEngineTest {
         val dir = tmp.newFolder("task-live-pair")
         val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
         assertEquals(
-            "静图+实况成对（title-1.jpg/实况.mp4 ×2）",
-            listOf("测试图集标题-1.jpg", "测试图集标题-1-实况.mp4", "测试图集标题-2.jpg", "测试图集标题-2-实况.mp4"),
+            "两张实况各合成单文件（title-N.MP.jpg ×2）",
+            listOf("测试图集标题-1.MP.jpg", "测试图集标题-2.MP.jpg"),
             out.map { it.fileName.toString() },
         )
-        assertTrue("实况流字节可辨", out[1].toFile().readBytes().contentEquals(LIVE_BYTES))
-        assertTrue(out[3].toFile().readBytes().contentEquals(LIVE_BYTES))
+        assertTrue(
+            "合成图内容=静图+实况流",
+            out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES + LIVE_BYTES),
+        )
+        assertTrue(out[1].toFile().readBytes().contentEquals(IMAGE2_BYTES + LIVE_BYTES))
     }
 
     @Test fun `probe 混合帖带 cookie detail 静图位空串占位不错位`() = runBlocking {
@@ -571,19 +616,17 @@ class DouyinEngineTest {
         val dir = tmp.newFolder("task-live-mixed")
         val out = e.download(info, Mode.VIDEO, null, dir.toPath(), "mp3", {}, { _, _ -> }, noCancel())
         assertEquals(
-            "第 1/3 张实况成对、第 2 张只有静图",
+            "第 1/3 张合成单文件实况图、第 2 张只有静图",
             listOf(
-                "测试混合标题-1.jpg", "测试混合标题-1-实况.mp4",
+                "测试混合标题-1.MP.jpg",
                 "测试混合标题-2.jpg",
-                "测试混合标题-3.jpg", "测试混合标题-3-实况.mp4",
+                "测试混合标题-3.MP.jpg",
             ),
             out.map { it.fileName.toString() },
         )
-        assertTrue(out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES))
-        assertTrue(out[1].toFile().readBytes().contentEquals(LIVE_BYTES))
-        assertTrue("静图张不带实况流", out[2].toFile().readBytes().contentEquals(IMAGE2_BYTES))
-        assertTrue(out[3].toFile().readBytes().contentEquals(IMAGE3_BYTES))
-        assertTrue(out[4].toFile().readBytes().contentEquals(LIVE_BYTES))
+        assertTrue(out[0].toFile().readBytes().contentEquals(IMAGE1_BYTES + LIVE_BYTES))
+        assertTrue("静图张不带实况流", out[1].toFile().readBytes().contentEquals(IMAGE2_BYTES))
+        assertTrue(out[2].toFile().readBytes().contentEquals(IMAGE3_BYTES + LIVE_BYTES))
     }
 
     @Test fun `probe 图集无 cookie 不请求 detail 静图降级`() = runBlocking {

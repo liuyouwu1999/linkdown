@@ -14,6 +14,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import top.linkdown.android.cookies.NetscapeCookieFile
 import top.linkdown.android.engine.internal.FfmpegPost
+import top.linkdown.android.engine.internal.LivePhotoCreator
 import top.linkdown.android.engine.internal.douyinSignDetailQuery
 import top.linkdown.android.engine.internal.safeFilename
 import top.linkdown.android.pipeline.PlatformDirs
@@ -37,6 +38,10 @@ class DouyinEngine(
     private val shareBaseUrl: String,
     ffmpegPath: String,
     private val detailBaseUrl: String = PROD_DETAIL_BASE_URL,
+    // 实况合成缝（JVM 单测注入桩；生产默认=LivePhotoCreator 设备自适应动态照片）：
+    // (静图, 实况流, 输出) → true=合成单文件实况图成功；false/异常由调用方回退两文件交付
+    private val liveMux: (File, File, File) -> Boolean =
+        { image, video, output -> LivePhotoCreator.createLivePhoto(image, video, output) },
 ) : MediaEngine {
 
     private val post = FfmpegPost(ffmpegPath)
@@ -90,8 +95,14 @@ class DouyinEngine(
  // 实况流真源=登录态签名 detail 接口（share 页匿名数据被抖音降级、无实况字段）；
  // 无 cookie/请求失败 → 静图降级（不阻断 probe）
             val detailLiveUrls = cookies?.takeIf { it.exists() }
-                ?.let { runCatching { fetchLiveUrlsViaDetail(vid, it) }.getOrNull() }
-                ?: emptyList()
+                ?.let {
+                    runCatching { fetchLiveUrlsViaDetail(vid, it) }
+                        .onFailure { f ->
+                            diagLog(LogPriority.WARN, "detail failed: ${f.javaClass.simpleName}: ${f.message}")
+                        }
+                        .getOrNull()
+                }
+                ?: emptyList<String>().also { diagLog(LogPriority.INFO, "cookie 缺失或 detail 失败 → 静图降级") }
             // detail 成功时为并行列表（静图张空串占位）；长度不齐=detail 图数与 share 不一致的异常
             // 形态 → 错位风险 → 保守回退 share 侧（静图降级）
             val liveUrls = if (detailLiveUrls.size == imagePairs.size) detailLiveUrls
@@ -209,7 +220,7 @@ class DouyinEngine(
             }
             Mode.VIDEO -> {
  // 图文：有什么下什么——多图逐张（title-1/2/3.jpg…），不走视频管道
-                if (info.hasImages) return imagesFlow(info, taskDir, onProgress, cancelHandle::isCancelled)
+                if (info.hasImages) return imagesFlow(info, taskDir, onProgress, cancelHandle::isCancelled, onLog)
                 val raw = taskDir.resolve("video.mp4")
                 streamToFile(requirePlayUrl(info), raw, onProgress, cancelHandle::isCancelled)
                 onProgress(1.0f, DOWNLOAD_DONE_LABEL)
@@ -219,10 +230,15 @@ class DouyinEngine(
     }
 
  /** 图文流：多图逐张下载（title-1/2/3.jpg…，≙XhsEngine.imagesFlow 图文形态）；
- * 实况图（ 有什么下什么 ）：liveUrls[i] 非空的张连实况视频流一起下（title-N-实况.mp4 成对落架）。 */
+ * 实况图（ 有什么下什么 ）：liveUrls[i] 非空的张成对落架后合成单文件实况图（title-N.MP.jpg，
+ * 官方 Motion Photo 命名规范 MP 紧贴扩展名——相册按文件内标记识别实况角标/长按播放，
+ * 视频字节原样内嵌不转码）；合成失败（非 JPEG/坏流/不支持等）→ 回退「静图+实况视频」两文件
+ * 交付（v1.0.0.8 行为，功能不劣化）。liveMux 任何异常一律吞掉回退（runCatching 兜底，
+ * JVM 单测默认缝下 android.jar 桩抛 Stub! 也不阻断下载）。 */
     private fun imagesFlow(info: ProbeInfo, taskDir: Path,
                            onProgress: (Float, String) -> Unit,
-                           isCancelled: () -> Boolean): List<Path> {
+                           isCancelled: () -> Boolean,
+                           onLog: (String) -> Unit): List<Path> {
         val urls = info.playUrl?.split(";")?.filter { it.isNotBlank() } ?: emptyList()
         if (urls.isEmpty()) throw EngineException(NO_PLAY_URL_MESSAGE)
         val products = mutableListOf<Path>()
@@ -231,14 +247,25 @@ class DouyinEngine(
             streamToFile(u, raw, onProgress, isCancelled)
             val final = taskDir.resolve(safeFilename("${info.title}-${i + 1}") + ".jpg")
             Files.move(raw, final, StandardCopyOption.REPLACE_EXISTING)
-            products.add(final) // Path 实现了 Iterable，+= 有重载歧义，须显式 add（XhsEngine 同款）
             info.liveUrls.getOrNull(i)?.takeIf { it.isNotBlank() }?.let { live ->
                 val liveRaw = taskDir.resolve("live-$i")
                 streamToFile(live, liveRaw, onProgress, isCancelled)
                 val liveFinal = taskDir.resolve(safeFilename("${info.title}-${i + 1}-实况") + ".mp4")
                 Files.move(liveRaw, liveFinal, StandardCopyOption.REPLACE_EXISTING)
-                products.add(liveFinal)
-            }
+                val muxed = taskDir.resolve(safeFilename("${info.title}-${i + 1}") + ".MP.jpg")
+                val muxResult = runCatching { liveMux(final.toFile(), liveFinal.toFile(), muxed.toFile()) }
+                if (muxResult.getOrDefault(false)) {
+                    products.add(muxed)
+                } else {
+                    // 失败原因入 logcat（队列 onLog 现为空实现，人话行仅作未来 UI 预留）
+                    diagLog(LogPriority.INFO,
+                        "fallback: ${muxResult.exceptionOrNull()?.let { it.javaClass.simpleName + ": " + it.message }
+                            ?: LivePhotoCreator.lastFailure ?: "returned false"}")
+                    onLog("实况图合成失败，按图片+视频两文件交付")
+                    products.add(final) // Path 实现了 Iterable，+= 有重载歧义，须显式 add（XhsEngine 同款）
+                    products.add(liveFinal)
+                }
+            } ?: products.add(final)
         }
         onProgress(1.0f, DOWNLOAD_DONE_LABEL)
         return products
@@ -281,14 +308,20 @@ class DouyinEngine(
             .header("Accept", "application/json, text/plain, */*")
             .build()
         probeClient.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) return emptyList()
+            if (!resp.isSuccessful) {
+                diagLog(LogPriority.WARN, "detail http ${resp.code}")
+                return emptyList()
+            }
             val body = resp.body?.string() ?: return emptyList()
             val detail = (Json.parseToJsonElement(body).jsonObject["aweme_detail"] as? JsonObject)
-                ?: return emptyList()
-            val imgs = (detail["images"] as? JsonArray) ?: return emptyList()
+                ?: run { diagLog(LogPriority.WARN, "detail 无 aweme_detail"); return emptyList() }
+            val imgs = (detail["images"] as? JsonArray)
+                ?: run { diagLog(LogPriority.WARN, "detail 无 images"); return emptyList() }
             // 必须并行列表（liveVideoUrl 同款语义：无 video 键的静图张=空串占位），不可 mapNotNull 丢
             // 元素——实况+静图混排帖丢元素后长度不齐 → probe 处 size 判等失败 → 整帖降级静图（真机 bug）
-            return imgs.map { liveVideoUrl(it) }
+            val urls = imgs.map { liveVideoUrl(it) }
+            diagLog(LogPriority.INFO, "detail imgs=${imgs.size} liveUrls=${urls.count { it.isNotBlank() }}")
+            return urls
         }
     }
 
@@ -396,4 +429,12 @@ class DouyinEngine(
         private const val NO_PLAY_URL_MESSAGE = "未取到播放地址，视频可能已删除或仅登录可见"
         private const val IMAGE_NO_AUDIO_MESSAGE = "图文没有音频可提取"
     }
+}
+
+// 实况通道诊断日志（真机 logcat tag=DouyinLive：detail 降级/合成回退的可观测性——队列 onLog
+// 现为空实现，诊断只能走 logcat）。引擎是 JVM 直测的：android.jar Log 桩被调用即抛
+// "not mocked"，故 runCatching 吞桩异常（真机照常输出）。
+private object LogPriority { const val INFO = 4; const val WARN = 5 }
+internal fun diagLog(priority: Int, msg: String) {
+    runCatching { android.util.Log.println(priority, "DouyinLive", msg) }
 }
