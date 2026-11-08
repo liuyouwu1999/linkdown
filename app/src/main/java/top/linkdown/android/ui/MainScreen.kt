@@ -56,9 +56,6 @@ data class MainUiState(
     val url: String = "",
  // 模式不再常驻主界面（产品拍板）：默认全不选，每次「下 单！」弹窗现勾
     val modes: DownloadModes = DownloadModes(video = false, audio = false, cover = false),
-    val sessExpanded: Boolean = false,
-    val sessText: String = "",
-    val hasCookie: Map<String, Boolean> = emptyMap(), // 各平台已存 cookie（回前台刷新，fix round 2）
     val logLines: List<String> = emptyList(),
     val clipboardUrl: String? = null, // 回前台检测到已知平台 URL → 面板内绿 chip（设计）
 )
@@ -102,9 +99,6 @@ fun MainScreen(
     shelf: List<ShelfEntry>,
     onUrlChange: (String) -> Unit,
     onModeChange: (DownloadModes) -> Unit,
-    onSessExpandedChange: (Boolean) -> Unit,
-    onSessChange: (String) -> Unit,
-    onSaveSess: () -> Unit,
     onOpenLoginHub: () -> Unit,
     onStart: (modes: DownloadModes, url: String, probeTitle: String?) -> Unit,
     onEnqueueGroup: (modes: DownloadModes, url: String, title: String, children: List<ChildRef>) -> Unit,
@@ -162,44 +156,19 @@ fun MainScreen(
                     onDeleteMany = onDeleteQueueItems, onTogglePaused, onOpenShelf)
             }
             Spacer(Modifier.height(13.dp))
- // ── 登录账号折叠（ 语义保留 + 入口回归；评审修复 挪到下单之下、出货之上）──
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(remember { MutableInteractionSource() }, indication = null) {
-                        onSessExpandedChange(!state.sessExpanded)
-                    }
-                    .padding(horizontal = 4.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (state.sessExpanded) "▾ 登录账号（可选）" else "▸ 登录账号（可选）",
-                    color = c.textSecondary, fontSize = 13.sp,
-                )
-            }
-            if (state.sessExpanded) {
-                PixelTextField(state.sessText, onSessChange, "粘贴 SESSDATA（B站，留空自动用已存 cookie）", singleLine = true)
-                Text("B站支持粘贴 SESSDATA；网易云请点下方按钮登录", color = c.textSecondary, fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp, start = 4.dp))
-                Spacer(Modifier.height(8.dp))
- // 粘贴→保存：显式确认+成功/失败反馈（成功清空输入并点亮「有✓」；对齐 web 端 cookie 保存按钮）
-                PixelButton("保 存", fontSize = 16.sp, onClick = onSaveSess)
-                Spacer(Modifier.height(8.dp))
- // 单入口进登录选择页（评审修复 产品拍板）
-                PixelButton(
-                    "去 登 录",
-                    style = PixelButtonStyle.SUCCESS,
-                    icon = Sprites.KEY,
-                    fontSize = 16.sp,
-                    onClick = onOpenLoginHub,
-                )
-                val mark = { v: Boolean? -> if (v == true) "有✓" else "无" }
-                Text(
-                    "B站 ${mark(state.hasCookie["bilibili"])} · 网易云 ${mark(state.hasCookie["netease"])}",
-                    color = c.textSecondary, fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 5.dp, start = 4.dp),
-                )
-            }
+ // ── 登录入口（用户拍板：去掉 cookie 输入折叠区，只留去登录+一行说明）──
+            PixelButton(
+                "去 登 录",
+                style = PixelButtonStyle.SUCCESS,
+                icon = Sprites.KEY,
+                fontSize = 16.sp,
+                onClick = onOpenLoginHub,
+            )
+            Text(
+                "登录后可下载需要账号的内容（B站、网易云等），不登录也能下大多数",
+                color = c.textSecondary, fontSize = 11.sp,
+                modifier = Modifier.padding(top = 5.dp, start = 4.dp),
+            )
             Spacer(Modifier.height(13.dp))
  // ── 设置入口（音频格式/画质档/并发数三行设置，独立页）──
             PixelButton("设 置", fontSize = 16.sp, icon = Sprites.SETTINGS, onClick = onOpenSettings)

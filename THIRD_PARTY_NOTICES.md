@@ -35,6 +35,13 @@
 - 用途: 抖音网页 detail 接口的 a_bogus / x-secsdk-web-signature 双签名（实况图登录态通道）
 - License: Apache License 2.0（Portions Copyright (c) Evil0ctal；Portions Copyright (c) JoeanAmier）
 
+## 动态照片合成协议：XHS_Downloader_Android（参考实现）
+
+- 项目: NEORUAA/XHS_Downloader_Android（MotionPhotoContainer / LivePhotoCreator 协议与字节布局参考，
+  来源 commit 见 app/src/test/resources/livephoto/README.md）
+- 用途: 实况照片按品牌合成为动态照片（小米/OPPO/三星/华为/vivo 等格式的参考基线；vivo 分支按相机原片证据另行调整）
+- License: GNU Affero General Public License v3.0
+
 ## Android / Kotlin 生态库
 
 - Jetpack Compose、AndroidX DataStore、kotlinx-serialization-json、OkHttp、

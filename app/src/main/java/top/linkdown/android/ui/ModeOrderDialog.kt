@@ -193,7 +193,9 @@ internal fun ModeOrderDialog(
 ) {
     val c = PixelTheme.colors
     val single = urls.singleOrNull()   // 单链接路径维持原行为；多链接走 Multi* 阶段
-    var sel by remember { mutableStateOf(initial) }
+    // 封面恒随单下载（用户拍板 2026-11-08：弹窗不提供封面勾选项）：sel.cover 恒 true，
+    // 阅读器音频/视频纸用书内封面页当缩略图；判重对已下载封面自动跳过
+    var sel by remember { mutableStateOf(initial.copy(cover = true)) }
     var stage by remember { mutableStateOf<OrderStage>(initialOrderStage(single)) }
     var multiPicked by remember { mutableStateOf(emptySet<Int>()) }
     val scope = rememberCoroutineScope()
@@ -320,16 +322,10 @@ internal fun ModeOrderDialog(
                                 PixelCheckRow("图片 · ${s.imageCount} 张", Sprites.IMAGE, "jpg", sel.video) {
                                     sel = sel.copy(video = !sel.video)
                                 }
-                                Spacer(Modifier.height(7.dp))
-                                PixelCheckRow("封面（首图）", Sprites.IMAGE, "jpg", sel.cover) {
-                                    sel = sel.copy(cover = !sel.cover)
-                                }
                             } else {
                                 PixelCheckRow("视频 mp4", Sprites.CAMERA, "1080P", sel.video) { sel = sel.copy(video = !sel.video) }
                                 Spacer(Modifier.height(7.dp))
                                 PixelCheckRow("仅音频", Sprites.NOTE, "mp3", sel.audio) { sel = sel.copy(audio = !sel.audio) }
-                                Spacer(Modifier.height(7.dp))
-                                PixelCheckRow("封面", Sprites.IMAGE, "jpg", sel.cover) { sel = sel.copy(cover = !sel.cover) }
                             }
                             if (s.imageCount == null && single != null && isMixedListUrl(single)) {
                                 Spacer(Modifier.height(7.dp))
@@ -340,7 +336,8 @@ internal fun ModeOrderDialog(
                             }
                             Spacer(Modifier.height(13.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                val anySelected = sel.video || sel.audio || sel.cover
+                                // 封面不再提供勾选项（用户拍板 2026-11-08）：恒随单下载，开始钮只看视频/音频
+                                val anySelected = sel.video || sel.audio
                                 if (s.imageCount == null && single != null && isMixedListUrl(single)) {
                                     PixelButton(
                                         "仅下这一个", enabled = anySelected, icon = Sprites.CHECK,

@@ -30,10 +30,10 @@ Every release ships with a SHA-256 checksum for verification.
 Ordering:
 
 - Share-to-download: tap "Share" in any app and pick Linkdown; the link is recognized automatically
-- Choose what you want before downloading: video (mp4) / audio only (mp3·m4a) / cover (jpg), any combination
+- Choose what you want before downloading: video (mp4) / audio only (mp3·m4a), any combination; the cover is downloaded automatically with every order (used as the cover of video/audio sheets in the reader)
 - Also accepts pasted links on the main screen; common short-link forms are expanded automatically
 - Batch multiple links in one paste: each link is detected automatically and listed in the dialog (playlists show their item count); pick what you want and download them all
-- Image posts detected automatically (Douyin/RedNote/Telegram): the dialog offers "images · N + cover (first image)" — download what's actually there; Douyin Live Photos are saved in full (still image + motion clip, as a pair; sign in to Douyin under Settings → Accounts; RedNote/Telegram image posts are stills); video posts keep the usual video/audio/cover options
+- Image posts detected automatically (Douyin/RedNote/Telegram): the dialog offers "images · N" — download what's actually there; Douyin Live Photos are saved in full (still image + motion clip, as a pair; sign in to Douyin under Settings → Accounts; RedNote/Telegram image posts are stills); video posts keep the usual video/audio options, and the cover is always downloaded automatically
 - The input clears itself after ordering; copy a new link, come back, and tap the clipboard chip to bring it in
 
 Queue:
@@ -47,7 +47,7 @@ Media library:
 
 - Products are archived per platform under the system Downloads folder (`Download/链接下载/<platform>/`), visible to gallery and file managers
 - The in-app "Shelf" page displays works instead of loose files: multiple images/files downloaded in one go are grouped into a single book (with an ×N badge); single-file downloads remain one book per file as before
-- Work reader: tap a book to flip through it with horizontal swipes and page indicators; video/audio pages play on tap (live photos are shown as still images — the motion plays in your gallery)
+- Work reader: tap a book to open it as pinned notes on a cork board, one sheet per file; images open full-screen, video/audio pages play on tap (live photos are shown as still images — the motion plays in your gallery)
 - Removal works on whole books: removing a book deletes all of its files (the confirmation dialog shows the file count); batch removal counts by book
 - Optional audio transcoding to mp3 / m4a with tags and cover art
 

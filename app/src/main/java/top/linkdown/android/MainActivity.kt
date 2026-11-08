@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
@@ -38,7 +39,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import top.linkdown.android.battery.BatteryPrompt
 import top.linkdown.android.battery.BatteryPromptDialog
-import top.linkdown.android.cookies.CookieStore
 import top.linkdown.android.engine.YtdlpEngine
 import top.linkdown.android.eula.EulaPromptDialog
 import top.linkdown.android.pipeline.PlatformDirs
@@ -100,7 +100,7 @@ class MainActivity : ComponentActivity() {
         )
         YtdlpEngine.initOnce(applicationContext)
         requestNotificationPermissionOnce()
-        setContent { PixelTheme { Root() } }
+        setContent { PixelTheme { Box(Modifier.fillMaxSize()) { Root() } } }
     }
 
  /** POST_NOTIFICATIONS 首次主界面请求（全局约束）：每安装一次，已授予/低版本不请求。 */
@@ -200,17 +200,12 @@ class MainActivity : ComponentActivity() {
         BackHandler(enabled = readerEntry != null) { readerEntry = null }
 
         LifecycleResumeEffect(Unit) {
- // 设计：回前台检测剪贴板为已知平台 URL → 绿 chip（取代早期的直接预填）；
- // fix round 1/2：回前台同时刷新各平台「已存 cookie」状态行
+ // 设计：回前台检测剪贴板为已知平台 URL → 绿 chip（取代早期的直接预填）
             val text = clipboard.getText()?.text?.trim()
-            val hasCookie = mapOf(
-                "bilibili" to (CookieStore.existing("bilibili", applicationContext.filesDir) != null),
-                "netease" to (CookieStore.existing("netease", applicationContext.filesDir) != null),
-            )
             ui = if (!text.isNullOrEmpty() && knownPlatformUrl(text) && ui.url.trim() != text) {
-                ui.copy(clipboardUrl = text, hasCookie = hasCookie)
+                ui.copy(clipboardUrl = text)
             } else {
-                ui.copy(clipboardUrl = null, hasCookie = hasCookie)
+                ui.copy(clipboardUrl = null)
             }
             refreshShelf()
             onPauseOrDispose { }
@@ -275,29 +270,6 @@ class MainActivity : ComponentActivity() {
                 shelf = shelf,
                 onUrlChange = { ui = ui.copy(url = it) },
                 onModeChange = { ui = ui.copy(modes = it) },
-                onSessExpandedChange = { ui = ui.copy(sessExpanded = it) },
-                onSessChange = { ui = ui.copy(sessText = it) },
-                onSaveSess = {
- // 粘贴框→「保存」持久化到 CookieStore（此后下单留空即自动用）；成功清空输入+「有✓」
- // 即时点亮；此前粘贴后无任何确认与反馈，无法判断是否生效。写盘走 IO 线程；
- // 容忍粘贴时带上「SESSDATA=」前缀的形态
-                    val s = ui.sessText.trim().removePrefix("SESSDATA=").trim()
-                    if (s.isEmpty()) {
-                        Toast.makeText(applicationContext, "先粘贴 SESSDATA 再保存", Toast.LENGTH_SHORT).show()
-                    } else {
-                        scope.launch {
-                            val ok = withContext(Dispatchers.IO) {
-                                runCatching { CookieStore.bilibili(s, applicationContext.filesDir) }.isSuccess
-                            }
-                            if (ok) {
-                                ui = ui.copy(sessText = "", hasCookie = ui.hasCookie + ("bilibili" to true))
-                                Toast.makeText(applicationContext, "B站 cookie 已保存 ✓", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(applicationContext, "保存失败，请重试", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                },
                 onOpenLoginHub = {
  // fix round 1/2：登录选择页 → 各平台 WebView 自动抓 Cookie
                     startActivity(Intent(this, LoginHubActivity::class.java))
@@ -308,7 +280,7 @@ class MainActivity : ComponentActivity() {
  // 状态日志记内容名不记链接：弹窗已 probe 到名字直接用；直连路径等 probe 回填（最多 20s，
  // 拿不到就只记「已下单」——链接不进日志）。
                     scope.launch {
-                        when (val r = queue.enqueue(url, modes, ui.sessText)) {
+                        when (val r = queue.enqueue(url, modes, "")) {
                             is EnqueueResult.Enqueued -> {
                                 val id = r.item.id
                                 val name = probeTitle ?: withTimeoutOrNull(20_000) {
@@ -327,7 +299,7 @@ class MainActivity : ComponentActivity() {
                 onEnqueueGroup = { modes, url, title, children ->
  // 批量：批量下单 → queue.enqueueGroup（父组+子项整批；FGS 由队列内触发）
                     scope.launch {
-                        when (val r = queue.enqueueGroup(title, url, modes, children, ui.sessText)) {
+                        when (val r = queue.enqueueGroup(title, url, modes, children, "")) {
                             is EnqueueResult.Enqueued ->
                                 log("已下单：${r.item.title}（${r.item.totalChildren} 条）")
                             EnqueueResult.Duplicate ->
@@ -337,11 +309,11 @@ class MainActivity : ComponentActivity() {
                 },
                 enumerateBatch = { u ->
  // 入口枚举缝（恰一次；抛错=弹窗人话不入队任何条目）
-                    (application as LinkdownApplication).pipeline.enumerate(u, ui.sessText)
+                    (application as LinkdownApplication).pipeline.enumerate(u, "")
                 },
                 probeFor = { u ->
  // 弹窗预判型缝（ 有什么下什么 ）：抖音/小红书/Telegram 开窗判图文/视频，选项自适应
-                    (application as LinkdownApplication).pipeline.probeFor(u, ui.sessText)
+                    (application as LinkdownApplication).pipeline.probeFor(u, "")
                 },
                 onCancel = { runId -> scope.launch { queue.cancel(runId) } },
                 onRetry = { runId -> scope.launch { queue.retry(runId) } },

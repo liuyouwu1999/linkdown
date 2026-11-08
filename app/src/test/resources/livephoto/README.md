@@ -1,7 +1,7 @@
 # Xiaomi compatibility fixture
 
 `xiaomi-before-multiformat.xmp` was extracted from `generateXmpMetadata` in
-`app/src/main/java/com/neoruaa/xhsdn/LivePhotoCreator.kt` at repository commit
+`app/src/main/java/top/linkdown/android/engine/internal/LivePhotoCreator.kt` at repository commit
 `15c5f5701b3479c2a970f3acf953625725f0d59c`.
 
 Only the three decimal video lengths have been replaced with `@VIDEO_LENGTH@`.

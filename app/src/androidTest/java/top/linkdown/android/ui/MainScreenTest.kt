@@ -20,7 +20,7 @@ import top.linkdown.android.queue.QueueState
 import top.linkdown.android.queue.QueueUiState
 
 /**
- * 功能任务 队列流语义断言 + 弹窗/登录折叠/剪贴板/出货回归。
+ * 功能任务 队列流语义断言 + 弹窗/登录入口/剪贴板/出货回归。
  * 注：androidTest 源集方法名禁用空格（D8 dexing 限制）
  *
  * ── 单任务卡五条断言 → 队列流语义迁移对照（按设计对照）──
@@ -64,8 +64,6 @@ class MainScreenTest {
         modes: DownloadModes = DownloadModes(false, false, false),
         queue: QueueUiState = QueueUiState(items = emptyList(), paused = false),
         clipboardUrl: String? = null,
-        sessExpanded: Boolean = false,
-        hasCookie: Map<String, Boolean> = emptyMap(),
         shelf: List<ShelfEntry> = emptyList(),
         onStart: () -> Unit = {}, // M3.5 起 MainScreen.onStart=(modes,url)，harness 转发吞参
         onModeChange: (DownloadModes) -> Unit = {},
@@ -77,13 +75,11 @@ class MainScreenTest {
             PixelTheme {
                 MainScreen(
                     state = MainUiState(
-                        url = url, modes = modes, sessExpanded = sessExpanded,
-                        hasCookie = hasCookie, clipboardUrl = clipboardUrl,
+                        url = url, modes = modes, clipboardUrl = clipboardUrl,
                     ),
                     queue = queue,
                     shelf = shelf,
-                    onUrlChange = {}, onModeChange = onModeChange, onSessExpandedChange = {}, onSessChange = {},
-                    onSaveSess = {},
+                    onUrlChange = {}, onModeChange = onModeChange,
                     onOpenLoginHub = onOpenLoginHub,
                     onStart = { _, _, _ -> onStart() }, onCancel = {}, onRetry = {}, onTogglePaused = onTogglePaused,
                     onImportClipboard = onImportClipboard, onOpenShelf = {}, onOpenShelfEntry = {},
@@ -192,8 +188,8 @@ class MainScreenTest {
                     state = MainUiState(url = url.value),
                     queue = QueueUiState(items = emptyList(), paused = false),
                     shelf = emptyList(),
-                    onUrlChange = { url.value = it }, onModeChange = {}, onSessExpandedChange = {},
-                    onSessChange = {}, onSaveSess = {}, onOpenLoginHub = {}, onStart = { _, _, _ -> }, onCancel = {}, onRetry = {},
+                    onUrlChange = { url.value = it }, onModeChange = {},
+                    onOpenLoginHub = {}, onStart = { _, _, _ -> }, onCancel = {}, onRetry = {},
                     onTogglePaused = {}, onImportClipboard = {}, onOpenShelf = {}, onOpenShelfEntry = {},
                     onOpenSettings = {}, onEnqueueGroup = { _, _, _, _ -> }, enumerateBatch = { BatchInfo("", emptyList(), 0) },
                     probeFor = { PROBE_INFO_DUMMY }, onDeleteQueueItem = {}, onDeleteQueueItems = {},
@@ -228,7 +224,7 @@ class MainScreenTest {
         rule.onNodeWithText("下 单！").performClick()
         rule.onNodeWithText("开 始").assertIsNotEnabled()
         rule.onNodeWithText("视频 mp4").performClick()
-        rule.onNodeWithText("封面").performClick()
+        rule.onNodeWithText("封面").assertDoesNotExist() // 恒随单：封面勾选项已删
         rule.onNodeWithText("开 始").assertIsEnabled().performClick()
         rule.onNodeWithText("要点什么").assertDoesNotExist() // 确认后弹窗收起
         rule.runOnIdle {
@@ -246,34 +242,31 @@ class MainScreenTest {
         rule.runOnIdle { assertTrue("取消不应触发 onStart", !started) }
     }
 
-    @Test fun login_fold_entry_opens_cookie_login() {
- // fix round 1/2 回归：折叠区单入口「去 登 录」进登录选择页；状态行双平台
+    @Test fun login_entry_button_opens_login_hub() {
+ // 登录折叠区改版回归：「去 登 录」按钮单入口进登录选择页
         var hubOpened = false
-        set(
-            sessExpanded = true,
-            hasCookie = mapOf("bilibili" to true, "netease" to false),
-            onOpenLoginHub = { hubOpened = true },
-        )
+        set(onOpenLoginHub = { hubOpened = true })
         rule.onNodeWithText("去 登 录").assertExists().assertIsEnabled().performClick()
-        rule.onNodeWithText("B站 有✓ · 网易云 无").assertExists()
         rule.runOnIdle { assertTrue("登录入口应触发 openLoginHub", hubOpened) }
     }
 
-    @Test fun login_fold_sits_between_order_button_and_shipment_panel() {
- // fix round 3：登录块挪到「下 单！」之下、今日出货之上，链接面板与下单之间不放任何东西
-        set(url = "https://x.com/a/1", sessExpanded = true)
+    @Test fun login_entry_sits_between_order_button_and_shipment_panel() {
+ // 位置回归：登录块仍在「下 单！」之下、今日出货之上
+        set(url = "https://x.com/a/1")
         val orderY = rule.onNodeWithText("下 单！").fetchSemanticsNode().positionInRoot.y
-        val foldY = rule.onNodeWithText("登录账号（可选）", substring = true).fetchSemanticsNode().positionInRoot.y
+        val loginY = rule.onNodeWithText("去 登 录").fetchSemanticsNode().positionInRoot.y
         val shipmentY = rule.onNodeWithText("今日出货 0 件").fetchSemanticsNode().positionInRoot.y
         rule.runOnIdle {
-            assertTrue("登录折叠区应在「下 单！」之下", orderY < foldY)
-            assertTrue("登录折叠区应在今日出货面板之上", foldY < shipmentY)
+            assertTrue("登录入口应在「下 单！」之下", orderY < loginY)
+            assertTrue("登录入口应在今日出货面板之上", loginY < shipmentY)
         }
     }
 
-    @Test fun login_fold_status_row_shows_absent_cookie() {
-        set(sessExpanded = true)
-        rule.onNodeWithText("B站 无 · 网易云 无").assertExists()
+    @Test fun login_section_has_no_cookie_input() {
+ // 用户拍板：cookie 输入折叠区移除，登录统一走登录选择页
+        set()
+        rule.onNodeWithText("登录账号（可选）", substring = true).assertDoesNotExist()
+        rule.onNodeWithText("SESSDATA", substring = true).assertDoesNotExist()
     }
 
     @Test fun clipboard_chip_click_imports() {
