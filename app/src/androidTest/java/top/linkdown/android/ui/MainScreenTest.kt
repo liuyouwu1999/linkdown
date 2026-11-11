@@ -61,12 +61,10 @@ class MainScreenTest {
 
     private fun set(
         url: String = "",
-        modes: DownloadModes = DownloadModes(false, false, false),
         queue: QueueUiState = QueueUiState(items = emptyList(), paused = false),
         clipboardUrl: String? = null,
         shelf: List<ShelfEntry> = emptyList(),
         onStart: () -> Unit = {}, // M3.5 起 MainScreen.onStart=(modes,url)，harness 转发吞参
-        onModeChange: (DownloadModes) -> Unit = {},
         onTogglePaused: () -> Unit = {},
         onImportClipboard: () -> Unit = {},
         onOpenLoginHub: () -> Unit = {},
@@ -75,11 +73,11 @@ class MainScreenTest {
             PixelTheme {
                 MainScreen(
                     state = MainUiState(
-                        url = url, modes = modes, clipboardUrl = clipboardUrl,
+                        url = url, clipboardUrl = clipboardUrl,
                     ),
                     queue = queue,
                     shelf = shelf,
-                    onUrlChange = {}, onModeChange = onModeChange,
+                    onUrlChange = {},
                     onOpenLoginHub = onOpenLoginHub,
                     onStart = { _, _, _ -> onStart() }, onCancel = {}, onRetry = {}, onTogglePaused = onTogglePaused,
                     onImportClipboard = onImportClipboard, onOpenShelf = {}, onOpenShelfEntry = {},
@@ -171,13 +169,13 @@ class MainScreenTest {
     @Test fun queue_pause_button_shows_when_not_paused() {
         var toggles = 0
         set(queue = QueueUiState(items = listOf(qItem(QueueState.Running, modeLabel = "视频", fraction = 0.2f)), paused = false), onTogglePaused = { toggles++ })
-        rule.onNodeWithText("暂 停").assertExists().performClick()
+        rule.onNodeWithText("暂停接单").assertExists().performClick()
         rule.runOnIdle { assertTrue("暂停按钮应触发 onTogglePaused", toggles == 1) }
     }
 
     @Test fun queue_continue_button_shows_when_paused() {
         set(queue = QueueUiState(items = listOf(qItem(QueueState.Running, modeLabel = "视频", fraction = 0.2f)), paused = true), onTogglePaused = {})
-        rule.onNodeWithText("继 续").assertExists()
+        rule.onNodeWithText("继续接单").assertExists()
     }
 
     @Test fun typing_url_enables_start() {
@@ -188,7 +186,7 @@ class MainScreenTest {
                     state = MainUiState(url = url.value),
                     queue = QueueUiState(items = emptyList(), paused = false),
                     shelf = emptyList(),
-                    onUrlChange = { url.value = it }, onModeChange = {},
+                    onUrlChange = { url.value = it },
                     onOpenLoginHub = {}, onStart = { _, _, _ -> }, onCancel = {}, onRetry = {},
                     onTogglePaused = {}, onImportClipboard = {}, onOpenShelf = {}, onOpenShelfEntry = {},
                     onOpenSettings = {}, onEnqueueGroup = { _, _, _, _ -> }, enumerateBatch = { BatchInfo("", emptyList(), 0) },
@@ -219,8 +217,7 @@ class MainScreenTest {
 
     @Test fun dialog_check_flow_enables_start_and_confirms() {
         var started = false
-        var reported: DownloadModes? = null
-        set(url = "https://x.com/a/1", onStart = { started = true }, onModeChange = { reported = it })
+        set(url = "https://x.com/a/1", onStart = { started = true })
         rule.onNodeWithText("下 单！").performClick()
         rule.onNodeWithText("开 始").assertIsNotEnabled()
         rule.onNodeWithText("视频 mp4").performClick()
@@ -229,7 +226,6 @@ class MainScreenTest {
         rule.onNodeWithText("要点什么").assertDoesNotExist() // 确认后弹窗收起
         rule.runOnIdle {
             assertTrue("弹窗确认应触发 onStart（主页入队）", started)
-            assertEquals(DownloadModes(video = true, audio = false, cover = true), reported)
         }
     }
 
@@ -251,14 +247,14 @@ class MainScreenTest {
     }
 
     @Test fun login_entry_sits_between_order_button_and_shipment_panel() {
- // 位置回归：登录块仍在「下 单！」之下、今日出货之上
+ // v2 重排回归：中部滚动区(后厨/今日出货/日志)在上，底部固定块=去登录→设置→输入卡→下单
         set(url = "https://x.com/a/1")
         val orderY = rule.onNodeWithText("下 单！").fetchSemanticsNode().positionInRoot.y
         val loginY = rule.onNodeWithText("去 登 录").fetchSemanticsNode().positionInRoot.y
         val shipmentY = rule.onNodeWithText("今日出货 0 件").fetchSemanticsNode().positionInRoot.y
         rule.runOnIdle {
-            assertTrue("登录入口应在「下 单！」之下", orderY < loginY)
-            assertTrue("登录入口应在今日出货面板之上", loginY < shipmentY)
+            assertTrue("登录入口应在「下 单！」之上", loginY < orderY)
+            assertTrue("今日出货面板应在登录入口之上", shipmentY < loginY)
         }
     }
 

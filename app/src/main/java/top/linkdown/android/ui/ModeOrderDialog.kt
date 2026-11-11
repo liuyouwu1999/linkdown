@@ -338,6 +338,7 @@ internal fun ModeOrderDialog(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 // 封面不再提供勾选项（用户拍板 2026-11-08）：恒随单下载，开始钮只看视频/音频
                                 val anySelected = sel.video || sel.audio
+                                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.weight(1f))
                                 if (s.imageCount == null && single != null && isMixedListUrl(single)) {
                                     PixelButton(
                                         "仅下这一个", enabled = anySelected, icon = Sprites.CHECK,
@@ -348,7 +349,6 @@ internal fun ModeOrderDialog(
                                     "开 始", enabled = anySelected,
                                     onClick = { startFlow() }, modifier = Modifier.weight(1f),
                                 )
-                                PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
                             }
                         }
                         OrderStage.Sniffing -> {
@@ -357,7 +357,7 @@ internal fun ModeOrderDialog(
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                             Spacer(Modifier.height(13.dp))
  // 关闭=取消预判型（协程随组合销毁自然结束，未入队任何条目——与 Parsing 同语义）
-                            PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+                            PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.fillMaxWidth())
                         }
                         OrderStage.Parsing -> {
                             Text("解析列表…", color = c.textSecondary, fontSize = 13.sp)
@@ -365,7 +365,7 @@ internal fun ModeOrderDialog(
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                             Spacer(Modifier.height(13.dp))
  // 关闭=取消枚举（丢弃 Future 自然结束，不入队任何条目）
-                            PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+                            PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.fillMaxWidth())
                         }
                         is OrderStage.Confirm -> {
                             if (s.info.children.size > MAX_GROUP_CHILDREN) {
@@ -378,6 +378,7 @@ internal fun ModeOrderDialog(
                             Text("将按上面勾选逐条下载", color = c.textSecondary, fontSize = 11.sp)
                             Spacer(Modifier.height(13.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.weight(1f))
                                 PixelButton(
                                     "开 始",
                                     onClick = {
@@ -386,7 +387,6 @@ internal fun ModeOrderDialog(
                                     },
                                     modifier = Modifier.weight(1f),
                                 )
-                                PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
                             }
                         }
                         is OrderStage.MultiParsing -> {
@@ -395,7 +395,7 @@ internal fun ModeOrderDialog(
                             LinearProgressIndicator(Modifier.fillMaxWidth())
                             Spacer(Modifier.height(13.dp))
  // 关闭=取消解析（弹窗协程随组合销毁，未入队任何条目——与单条 Parsing 同语义）
-                            PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+                            PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.fillMaxWidth())
                         }
                         is OrderStage.MultiConfirm -> {
                             Text("将按勾选逐条下单；合集整组入队", color = c.textSecondary, fontSize = 11.sp)
@@ -419,6 +419,8 @@ internal fun ModeOrderDialog(
                             }
                             Spacer(Modifier.height(13.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.weight(1f))
+                                PixelButton("返 回", style = PixelButtonStyle.NEUTRAL, onClick = { stage = OrderStage.Modes(null) }, modifier = Modifier.weight(1f))
                                 PixelButton(
                                     "开 始", enabled = multiPicked.isNotEmpty(),
                                     onClick = {
@@ -433,16 +435,14 @@ internal fun ModeOrderDialog(
                                     },
                                     modifier = Modifier.weight(1f),
                                 )
-                                PixelButton("返 回", onClick = { stage = OrderStage.Modes(null) }, modifier = Modifier.weight(1f))
-                                PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
                             }
                         }
                         is OrderStage.Error -> {
                             Text(s.message, color = c.error, fontSize = 12.sp)
                             Spacer(Modifier.height(13.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                PixelButton("返 回", onClick = { stage = OrderStage.Modes(null) }, modifier = Modifier.weight(1f))
-                                PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
+                                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.weight(1f))
+                                PixelButton("返 回", style = PixelButtonStyle.NEUTRAL, onClick = { stage = OrderStage.Modes(null) }, modifier = Modifier.weight(1f))
                             }
                         }
                     }
@@ -467,6 +467,7 @@ private fun MultiLineRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 48.dp)
                 .background(if (checked) c.selectedBg else Color.White, shape)
                 .border(2.dp, c.outline, shape)
                 .clickable(remember { MutableInteractionSource() }, indication = null) { onToggle() }

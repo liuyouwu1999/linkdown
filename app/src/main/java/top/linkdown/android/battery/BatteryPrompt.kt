@@ -66,7 +66,7 @@ fun BatteryPromptDialog(onAccept: () -> Unit, onDecline: (neverAsk: Boolean) -> 
             PixelCheckRow("不再提醒", Sprites.NOTE, "", neverAsk) { neverAsk = !neverAsk }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PixelButton("暂 不", style = PixelButtonStyle.SUCCESS, onClick = { onDecline(neverAsk) }, modifier = Modifier.weight(1f))
+                PixelButton("暂 不", style = PixelButtonStyle.NEUTRAL, onClick = { onDecline(neverAsk) }, modifier = Modifier.weight(1f))
                 PixelButton("去设置", onClick = onAccept, modifier = Modifier.weight(1f))
             }
         }

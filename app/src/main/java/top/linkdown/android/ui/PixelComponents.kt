@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
@@ -197,6 +199,39 @@ fun PixelIcon(
     }
 }
 
+/* ==================== 二级页顶栏（spec §3）：← 返回（热区≥48dp）+ 居中标题 + 右占位 ==================== */
+
+@Composable
+fun PageTopBar(
+    title: String,
+    titleIcon: List<String>? = null,
+    onBack: () -> Unit,
+) {
+    val c = PixelTheme.colors
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+    ) {
+        Text(
+            "← 返回",
+            color = c.darkBrown, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .pixelMinTouchTarget()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(remember { MutableInteractionSource() }, indication = null) { onBack() }
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        if (titleIcon != null) {
+            PixelIcon(titleIcon, c.darkBrown, accent = c.gold, iconSize = 16.dp)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(title, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(52.dp)) // 与「返回」等宽占位，保持标题居中
+    }
+}
+
 /* ==================== 面板（设计：圆角 10dp / #FFFBEA / 3dp 框 / 4dp 偏移投影 #C9B88C） ==================== */
 
 @Composable
@@ -241,7 +276,18 @@ fun PixelPanelLabel(icon: List<String>, text: String) {
 
 /* ==================== 主按钮（设计：圆角 10dp / 橙底白字 / 3dp 棕框 / 4dp 底投影，按下沉入） ==================== */
 
-enum class PixelButtonStyle { PRIMARY, SUCCESS, ERROR }
+/** 像素风触控热区保底（spec §2.1）：置于 Modifier 链首——槽位 ≥48×48dp、可见内容居中不变。
+ *  禁止置于固定尺寸约束（.height/.size）内侧（wrapper 上报 max(自然,48) 不收敛传入 max，构成约束违反）。 */
+fun Modifier.pixelMinTouchTarget(): Modifier = this.minimumInteractiveComponentSize()
+
+/** NEUTRAL 逃逸键共用三色（spec §5.2 规则 1/7）：PixelButton、ShelfPixelButton、登录页「清除」同源引用——底=surface、字=textSecondary、框均 c.outline 2dp。 */
+@Composable
+fun pixelNeutralContainer(): Color = PixelTheme.colors.surface
+
+@Composable
+fun pixelNeutralContent(): Color = PixelTheme.colors.textSecondary
+
+enum class PixelButtonStyle { PRIMARY, SUCCESS, ERROR, NEUTRAL }
 
 @Composable
 fun PixelButton(
@@ -261,7 +307,14 @@ fun PixelButton(
         PixelButtonStyle.PRIMARY -> c.primary
         PixelButtonStyle.SUCCESS -> c.success
         PixelButtonStyle.ERROR -> c.error
+ // NEUTRAL 逃逸键（spec §5.2）：与登录页「清除」描边次要样式共用三色（规则 1/7）
+        PixelButtonStyle.NEUTRAL -> pixelNeutralContainer()
     }
+    val contentColor = if (style == PixelButtonStyle.NEUTRAL) pixelNeutralContent() else c.onPrimary
+    val shadowColor =
+        if (style == PixelButtonStyle.NEUTRAL) c.buttonShadow.copy(alpha = c.buttonShadow.alpha * 0.4f)
+        else c.buttonShadow
+    val borderWidth = if (style == PixelButtonStyle.NEUTRAL) 2.dp else 3.dp
     val shape = RoundedCornerShape(10.dp)
     Box(
         modifier = modifier
@@ -270,21 +323,21 @@ fun PixelButton(
             .offset(y = if (sunk) 4.dp else 0.dp)
             .drawBehind {
  // 按下时底投影消失（按钮沉入手感）；禁用态灰化但投影保留
-                if (!sunk) drawRoundRect(c.buttonShadow, topLeft = Offset(0f, 4.dp.toPx()), cornerRadius = CornerRadius(10.dp.toPx()))
+                if (!sunk) drawRoundRect(shadowColor, topLeft = Offset(0f, 4.dp.toPx()), cornerRadius = CornerRadius(10.dp.toPx()))
             }
             .background(if (enabled) back else c.textSecondary, shape)
-            .border(3.dp, c.outline, shape)
+            .border(borderWidth, c.outline, shape)
             .clickable(enabled = enabled, interactionSource = interactionSource, indication = null) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
-                PixelIcon(icon, if (enabled) c.onPrimary else c.background, iconSize = 14.dp)
+                PixelIcon(icon, if (enabled) contentColor else c.background, iconSize = 14.dp)
                 Spacer(Modifier.width(6.dp))
             }
             Text(
                 text,
-                color = if (enabled) c.onPrimary else c.background,
+                color = if (enabled) contentColor else c.background,
                 fontSize = fontSize,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 2.sp,
@@ -517,7 +570,7 @@ fun PixelConfirmDialog(
             Text(message, color = c.textSecondary, fontSize = 13.sp, lineHeight = 19.sp)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
+                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.weight(1f))
                 PixelButton(confirmText, style = PixelButtonStyle.ERROR, onClick = onConfirm, modifier = Modifier.weight(1f))
             }
         }

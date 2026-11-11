@@ -269,7 +269,6 @@ class MainActivity : ComponentActivity() {
                 queue = queueState,
                 shelf = shelf,
                 onUrlChange = { ui = ui.copy(url = it) },
-                onModeChange = { ui = ui.copy(modes = it) },
                 onOpenLoginHub = {
  // fix round 1/2：登录选择页 → 各平台 WebView 自动抓 Cookie
                     startActivity(Intent(this, LoginHubActivity::class.java))

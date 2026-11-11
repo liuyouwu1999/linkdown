@@ -41,10 +41,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import top.linkdown.android.cookies.CookieStore
+import top.linkdown.android.ui.PageTopBar
 import top.linkdown.android.ui.PixelConfirmDialog
 import top.linkdown.android.ui.PixelIcon
 import top.linkdown.android.ui.PixelTheme
 import top.linkdown.android.ui.Sprites
+import top.linkdown.android.ui.pixelMinTouchTarget
+import top.linkdown.android.ui.pixelNeutralContainer
+import top.linkdown.android.ui.pixelNeutralContent
 
 /**
  * 登录选择页（评审修复 产品拍板）：细棚条 + 招牌「登录账号」+ 平台行卡
@@ -62,6 +66,7 @@ class LoginHubActivity : ComponentActivity() {
         setContent {
             PixelTheme {
                 LoginHubScreen(
+                    onBack = { finish() },
                     onOpenPlatform = { openPlatform(it) },
                     onClear = { platform, filesDir -> clearPlatform(platform, filesDir) },
                 )
@@ -106,6 +111,7 @@ internal fun platformDisplayName(platform: String): String = when (platform) {
 
 @Composable
 private fun LoginHubScreen(
+    onBack: () -> Unit,
     onOpenPlatform: (String) -> Unit,
     onClear: (String, java.io.File) -> Boolean,
 ) {
@@ -135,10 +141,8 @@ private fun LoginHubScreen(
                     drawRect(c.outline, topLeft = Offset(0f, h), size = Size(size.width, 3.dp.toPx()))
                 },
         )
- // 招牌「登录账号」
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
-            Text("登录账号", color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
+ // 顶栏「登录账号」（PageTopBar 统一二级页顶栏，spec §3；页内原招牌删除）
+        PageTopBar(title = "登录账号", onBack = onBack)
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -222,21 +226,23 @@ private fun LoginPlatformRow(
         }
         Spacer(Modifier.width(8.dp))
         val btnShape = RoundedCornerShape(5.dp)
- // 「清除」只在有 cookie 时出现（outline 底=次要动作，不抢登录主按钮）
+ // 「清除」只在有 cookie 时出现（NEUTRAL 三色=次要动作，不抢登录主按钮；热区≥48dp）
         if (hasCookie) {
             Box(
                 Modifier
-                    .background(c.surface, btnShape)
+                    .pixelMinTouchTarget()
+                    .background(pixelNeutralContainer(), btnShape)
                     .border(2.dp, c.outline, btnShape)
                     .clickable(remember { MutableInteractionSource() }, indication = null) { onClear() }
                     .padding(horizontal = 9.dp, vertical = 6.dp),
             ) {
-                Text("清除", color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("清除", color = pixelNeutralContent(), fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(8.dp))
         }
         Box(
             Modifier
+                .pixelMinTouchTarget()
                 .background(c.primary, btnShape)
                 .border(2.dp, c.outline, btnShape)
                 .clickable(remember { MutableInteractionSource() }, indication = null) { onClick() }

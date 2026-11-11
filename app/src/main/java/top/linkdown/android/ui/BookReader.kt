@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -57,10 +58,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -143,6 +147,7 @@ fun BookReader(entry: ShelfEntry, onDismiss: () -> Unit, onPlayPage: (ShelfItem)
                     "←",
                     color = Color(0xFFFFF6E3), fontSize = 18.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier
+                        .pixelMinTouchTarget()
                         .clickable(MutableInteractionSource(), indication = null) { onDismiss() }
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
@@ -696,6 +701,21 @@ private fun ImageViewer(page: ShelfItem, onDismiss: () -> Unit) {
             )
             failed -> Text("加载失败", color = Color(0xFFC9B88C), fontSize = 13.sp)
             else -> Text("加载中…", color = Color(0xFFC9B88C), fontSize = 13.sp)
+        }
+        // 可见关闭钮（spec §6.1）：48×48 热区；「点任意处关闭」保留——内层 clickable 消费事件不冒泡
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(top = 8.dp, end = 8.dp)
+                .background(Color(0x66FFF6E3), RoundedCornerShape(8.dp))
+                .border(1.dp, Color(0x591E0F06), RoundedCornerShape(8.dp))
+                .pixelMinTouchTarget()
+                .clickable(MutableInteractionSource(), indication = null) { onDismiss() }
+                .semantics { contentDescription = "关闭" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("×", color = Color(0xE61E0F06), fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

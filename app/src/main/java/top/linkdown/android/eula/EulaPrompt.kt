@@ -55,7 +55,7 @@ fun EulaPromptDialog(onAccept: () -> Unit, onDecline: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PixelButton("不同意", style = PixelButtonStyle.SUCCESS, onClick = onDecline, modifier = Modifier.weight(1f))
+                PixelButton("不同意", style = PixelButtonStyle.NEUTRAL, onClick = onDecline, modifier = Modifier.weight(1f))
                 PixelButton("同意", onClick = onAccept, modifier = Modifier.weight(1f))
             }
         }

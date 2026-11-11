@@ -92,7 +92,7 @@ fun UpdateOfferDialog(
             }
             Spacer(Modifier.height(12.dp))
             Row {
-                PixelButton("下次再说", style = PixelButtonStyle.SUCCESS, onClick = { onDismiss(neverRemind) }, modifier = Modifier.weight(1f))
+                PixelButton("下次再说", style = PixelButtonStyle.NEUTRAL, onClick = { onDismiss(neverRemind) }, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
                 PixelButton("下载更新", onClick = onDownload, modifier = Modifier.weight(1f))
             }
@@ -201,14 +201,14 @@ fun UpdateInstallFlow(
             Spacer(Modifier.height(12.dp))
             if (terminal) {
                 Row {
+                    PixelButton("关 闭", style = PixelButtonStyle.NEUTRAL, onClick = onDismiss, modifier = Modifier.weight(1f))
                     if (canRetryInstall) {
-                        PixelButton("重试安装", onClick = { canRetryInstall = false; tryInstall() }, modifier = Modifier.weight(1f))
                         Spacer(Modifier.width(8.dp))
+                        PixelButton("重试安装", onClick = { canRetryInstall = false; tryInstall() }, modifier = Modifier.weight(1f))
                     }
-                    PixelButton("关 闭", style = PixelButtonStyle.SUCCESS, onClick = onDismiss, modifier = Modifier.weight(1f))
                 }
             } else {
-                PixelButton("取 消", style = PixelButtonStyle.SUCCESS, onClick = {
+                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, onClick = {
                     cancelled = true
                 }, modifier = Modifier.fillMaxWidth())
             }

@@ -11,6 +11,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +52,7 @@ import top.linkdown.android.ui.PixelButton
 import top.linkdown.android.ui.PixelButtonStyle
 import top.linkdown.android.ui.PixelTheme
 import top.linkdown.android.ui.Sprites
+import top.linkdown.android.ui.pixelMinTouchTarget
 
 /**
  * WebView 登录自动抓 Cookie（评审修复 像素化改造 + 双平台；评审修复 自动检测+自动关闭）：
@@ -89,6 +92,7 @@ class CookieLoginActivity : ComponentActivity() {
             PixelTheme {
                 LoginScreen(
                     cfg,
+                    onBack = { finish() },
                     onGrab = { grabAndSave(cfg) },
                     onAutoGrab = { autoGrabIfCookieReady(cfg) },
                     onAutoClick = { v, c, u -> autoClickDouyinLogin(v, c, u) },
@@ -263,6 +267,7 @@ internal fun loginCfgFor(platform: String): LoginCfg = when (platform) {
 @Composable
 private fun LoginScreen(
     cfg: LoginCfg,
+    onBack: () -> Unit,
     onGrab: () -> Unit,
     onAutoGrab: () -> Unit,
     onAutoClick: (android.webkit.WebView, LoginCfg, String) -> Unit,
@@ -287,20 +292,31 @@ private fun LoginScreen(
                 },
         )
         Spacer(Modifier.height(10.dp))
- // 小号木招牌「XX 登录」
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), horizontalArrangement = Arrangement.Center) {
-            val signShape = RoundedCornerShape(8.dp)
-            Box(
-                Modifier
-                    .offset(y = 4.dp)
-                    .drawBehind {
-                        drawRoundRect(c.buttonShadow, topLeft = Offset(0f, 4.dp.toPx()), cornerRadius = CornerRadius(8.dp.toPx()))
-                    }
-                    .background(c.darkBrown, signShape)
-                    .border(3.dp, c.outline, signShape)
-                    .padding(horizontal = 24.dp, vertical = 7.dp),
-            ) {
-                Text(cfg.signText, color = c.onDarkBrown, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+ // 小号木招牌「XX 登录」（左端返回钮热区≥48dp，spec §3.3；招牌保持居中不受挤占）
+        Box(Modifier.fillMaxWidth()) {
+            Text(
+                "← 返回",
+                color = c.awningCream, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .pixelMinTouchTarget()
+                    .clickable(remember { MutableInteractionSource() }, indication = null) { onBack() }
+                    .padding(horizontal = 6.dp),
+            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), horizontalArrangement = Arrangement.Center) {
+                val signShape = RoundedCornerShape(8.dp)
+                Box(
+                    Modifier
+                        .offset(y = 4.dp)
+                        .drawBehind {
+                            drawRoundRect(c.buttonShadow, topLeft = Offset(0f, 4.dp.toPx()), cornerRadius = CornerRadius(8.dp.toPx()))
+                        }
+                        .background(c.darkBrown, signShape)
+                        .border(3.dp, c.outline, signShape)
+                        .padding(horizontal = 24.dp, vertical = 7.dp),
+                ) {
+                    Text(cfg.signText, color = c.onDarkBrown, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                }
             }
         }
         Spacer(Modifier.height(9.dp))

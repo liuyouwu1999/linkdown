@@ -54,8 +54,6 @@ import top.linkdown.android.queue.groupProgressFraction
 
 data class MainUiState(
     val url: String = "",
- // 模式不再常驻主界面（产品拍板）：默认全不选，每次「下 单！」弹窗现勾
-    val modes: DownloadModes = DownloadModes(video = false, audio = false, cover = false),
     val logLines: List<String> = emptyList(),
     val clipboardUrl: String? = null, // 回前台检测到已知平台 URL → 面板内绿 chip（设计）
 )
@@ -98,7 +96,6 @@ fun MainScreen(
     queue: QueueUiState,
     shelf: List<ShelfEntry>,
     onUrlChange: (String) -> Unit,
-    onModeChange: (DownloadModes) -> Unit,
     onOpenLoginHub: () -> Unit,
     onStart: (modes: DownloadModes, url: String, probeTitle: String?) -> Unit,
     onEnqueueGroup: (modes: DownloadModes, url: String, title: String, children: List<ChildRef>) -> Unit,
@@ -128,9 +125,57 @@ fun MainScreen(
             Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp),
+                .padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
         ) {
- // ── 面板一：交给我想要的链接（设计）──
+ // ── 后厨（队列卡，吸底重排后移入中部滚动区首位）──
+            val queueCards = queue.items.filter { it.parentGroupId == null && it.state in queueVisibleStates }
+            if (queueCards.isNotEmpty()) {
+                QueueArea(queue, queueCards, onCancel, onRetry, onDelete = { pendingDelete = it },
+                    onDeleteMany = onDeleteQueueItems, onTogglePaused, onOpenShelf)
+                Spacer(Modifier.height(11.dp))
+            }
+ // ── 面板二：今日出货（区头「全部 >」进货架页；头行热区≥48dp，spec §2.2 #8）──
+            PixelPanel {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pixelMinTouchTarget()
+                        .clickable(remember { MutableInteractionSource() }, indication = null) { onOpenShelf() },
+                ) {
+                    PixelIcon(Sprites.BOX, c.darkBrown, accent = c.gold, iconSize = 14.dp)
+                    Spacer(Modifier.width(5.dp))
+                    Text("今日出货 ${shelf.size} 件", color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text("全部 >", color = c.darkBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(6.dp))
+                ShipmentArea(shelf.take(3), onOpenShelfEntry)
+            }
+            if (state.logLines.isNotEmpty()) {
+                Spacer(Modifier.height(11.dp))
+                LogArea(state.logLines, listState)
+            }
+        }
+ // ── 底部固定块（不滚动；insets 全由根级 safeDrawingPadding 承担，勿叠加 navigationBars/imePadding）──
+        Column(Modifier.padding(horizontal = 14.dp)) {
+ // ── 登录入口（用户拍板：只留去登录+一行说明）──
+            PixelButton(
+                "去 登 录",
+                style = PixelButtonStyle.SUCCESS,
+                icon = Sprites.KEY,
+                fontSize = 16.sp,
+                onClick = onOpenLoginHub,
+            )
+            Text(
+                "登录后可下载需要账号的内容（B站、网易云等），不登录也能下大多数",
+                color = c.textSecondary, fontSize = 11.sp,
+                modifier = Modifier.padding(top = 5.dp, start = 4.dp),
+            )
+            Spacer(Modifier.height(13.dp))
+ // ── 设置入口 ──
+            PixelButton("设 置", fontSize = 16.sp, icon = Sprites.SETTINGS, onClick = onOpenSettings)
+            Spacer(Modifier.height(13.dp))
+ // ── 面板一：交给我想要的链接 ──
             PixelPanel {
                 PixelPanelLabel(Sprites.BOX, "交给我想要的链接：")
                 PixelTextField(state.url, onUrlChange, "粘贴视频链接…", testTag = "urlField")
@@ -146,54 +191,9 @@ fun MainScreen(
                 }
             }
             Spacer(Modifier.height(11.dp))
- // ── 主按钮：下单（队列化后常驻——取消/重试移入各队列卡，设计）──
+ // ── 主按钮：下单（吸底=拇指自然区，spec §4）──
             PixelButton("下 单！", enabled = isValidInput(state), onClick = { showOrderDialog = true })
- // 子项不出独立卡（设计）：经父组卡呈现
-            val queueCards = queue.items.filter { it.parentGroupId == null && it.state in queueVisibleStates }
-            if (queueCards.isNotEmpty()) {
-                Spacer(Modifier.height(11.dp))
-                QueueArea(queue, queueCards, onCancel, onRetry, onDelete = { pendingDelete = it },
-                    onDeleteMany = onDeleteQueueItems, onTogglePaused, onOpenShelf)
-            }
-            Spacer(Modifier.height(13.dp))
- // ── 登录入口（用户拍板：去掉 cookie 输入折叠区，只留去登录+一行说明）──
-            PixelButton(
-                "去 登 录",
-                style = PixelButtonStyle.SUCCESS,
-                icon = Sprites.KEY,
-                fontSize = 16.sp,
-                onClick = onOpenLoginHub,
-            )
-            Text(
-                "登录后可下载需要账号的内容（B站、网易云等），不登录也能下大多数",
-                color = c.textSecondary, fontSize = 11.sp,
-                modifier = Modifier.padding(top = 5.dp, start = 4.dp),
-            )
-            Spacer(Modifier.height(13.dp))
- // ── 设置入口（音频格式/画质档/并发数三行设置，独立页）──
-            PixelButton("设 置", fontSize = 16.sp, icon = Sprites.SETTINGS, onClick = onOpenSettings)
-            Spacer(Modifier.height(13.dp))
- // ── 面板二：今日出货（设计：内嵌深棕区 + 区头「全部 >」进货架页）──
-            PixelPanel {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(remember { MutableInteractionSource() }, indication = null) { onOpenShelf() },
-                ) {
-                    PixelIcon(Sprites.BOX, c.darkBrown, accent = c.gold, iconSize = 14.dp)
-                    Spacer(Modifier.width(5.dp))
-                    Text("今日出货 ${shelf.size} 件", color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text("全部 >", color = c.darkBrown, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.height(6.dp))
-                ShipmentArea(shelf.take(3), onOpenShelfEntry)
-            }
-            if (state.logLines.isNotEmpty()) {
-                Spacer(Modifier.height(11.dp))
-                LogArea(state.logLines, listState)
-                Spacer(Modifier.height(8.dp))
-            }
+            Spacer(Modifier.height(8.dp))
         }
     }
  // ── 弹窗选模式（产品拍板的核心交互，设计）：点「下 单！」→ 底部弹窗勾选 ──
@@ -202,24 +202,22 @@ fun MainScreen(
     if (showOrderDialog) {
         ModeOrderDialog(
             urls = extractOrderUrls(state.url),
-            initial = state.modes,
+ // 默认全不选，每次「下 单！」弹窗现勾（产品拍板，MainUiState 旧注释平移于此）；不跨次记忆
+            initial = DownloadModes(false, false, false),
             enumerate = enumerateBatch,
             probeFor = probeFor,
             onConfirmSingle = { modes, u, probeTitle ->
                 showOrderDialog = false
-                onModeChange(modes)
                 onUrlChange("")   // 下单即清空（对齐网页版）；下一条链接走剪贴板绿 chip 带入
                 onStart(modes, u, probeTitle)
             },
             onConfirmBatch = { modes, u, title, children ->
                 showOrderDialog = false
-                onModeChange(modes)
                 onUrlChange("")
                 onEnqueueGroup(modes, u, title, children)
             },
             onConfirmMulti = { modes, singles, groups ->
                 showOrderDialog = false
-                onModeChange(modes)
                 onUrlChange("")
                 singles.forEach { onStart(modes, it.url, it.probeTitle) }
                 groups.forEach { onEnqueueGroup(modes, it.url, it.title, it.children) }
@@ -283,7 +281,7 @@ private fun QueueArea(
             PixelPanelLabel(Sprites.BOX, if (activeCount > 0) "后厨 · ${activeCount} 单" else "后厨")
             Spacer(Modifier.weight(1f))
             PixelButton(
-                if (queue.paused) "继 续" else "暂 停",
+                if (queue.paused) "继续接单" else "暂停接单",
                 fontSize = 14.sp,
                 onClick = onTogglePaused,
                 modifier = Modifier.width(120.dp),
@@ -300,7 +298,7 @@ private fun QueueArea(
                 PixelButton("删 除", enabled = selected.isNotEmpty(), style = PixelButtonStyle.ERROR,
                     fontSize = 12.sp, modifier = Modifier.width(64.dp), onClick = { confirmBatch = true })
                 Spacer(Modifier.width(7.dp))
-                PixelButton("取 消", style = PixelButtonStyle.SUCCESS, fontSize = 12.sp,
+                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL, fontSize = 12.sp,
                     modifier = Modifier.width(64.dp), onClick = { selecting = false; selected = emptySet() })
             }
         }
@@ -581,6 +579,7 @@ private fun ShipmentArea(recent: List<ShelfEntry>, onOpen: (ShelfEntry) -> Unit)
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(c.surface, cardShape)
+                            .pixelMinTouchTarget()
                             .clickable(remember { MutableInteractionSource() }, indication = null) { onOpen(entry) }
                             .padding(horizontal = 7.dp, vertical = 5.dp),
                     ) {

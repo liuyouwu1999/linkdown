@@ -137,6 +137,7 @@ fun ShelfScreen(
                 "← 返回",
                 color = c.awningCream, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier
+                    .pixelMinTouchTarget()
                     .clip(RoundedCornerShape(6.dp))
                     .clickable(remember { MutableInteractionSource() }, indication = null) { onBack() }
                     .padding(horizontal = 4.dp, vertical = 6.dp),
@@ -147,7 +148,8 @@ fun ShelfScreen(
             if (selecting) {
  // 多选态：排序/切换退位给「取 消」（选择态下点书/行只做勾选）
                 ShelfPixelButton(
-                    "取 消", container = Color(0xFF2E8B62),
+                    "取 消", container = pixelNeutralContainer(),
+                    contentColor = pixelNeutralContent(),
                     onClick = { selecting = false; selected = emptySet() },
                     modifier = Modifier.width(78.dp),
                 )
@@ -221,20 +223,21 @@ fun ShelfScreen(
                 )
                 Spacer(Modifier.weight(1f))
                 ShelfPixelButton(
-                    "全 选", container = Color(0xFFC9731E), fontSize = 12.sp, height = 30.dp,
+                    "全 选", container = Color(0xFFC9731E), fontSize = 12.sp,
                     onClick = { selected = sortedEntries.map { it.id }.toSet() },
                     modifier = Modifier.width(64.dp),
                 )
                 Spacer(Modifier.width(6.dp))
                 ShelfPixelButton(
-                    "下架所选", container = Color(0xFFB03240), fontSize = 12.sp, height = 30.dp,
+                    "下架所选", container = Color(0xFFB03240), fontSize = 12.sp,
                     enabled = selected.isNotEmpty(),
                     onClick = { confirmBatch = true },
                     modifier = Modifier.width(88.dp),
                 )
                 Spacer(Modifier.width(6.dp))
                 ShelfPixelButton(
-                    "完 成", container = Color(0xFF2E8B62), fontSize = 12.sp, height = 30.dp,
+                    "完 成", container = pixelNeutralContainer(), contentColor = pixelNeutralContent(),
+                    fontSize = 12.sp,
                     onClick = { selecting = false; selected = emptySet() },
                     modifier = Modifier.width(64.dp),
                 )
@@ -345,7 +348,8 @@ private fun ShelfPixelButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     fontSize: TextUnit = 13.sp,
-    height: Dp = 38.dp,
+    height: Dp = 48.dp,
+    contentColor: Color = Color(0xFFFFF6E3),
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(6.dp)
@@ -384,7 +388,7 @@ private fun ShelfPixelButton(
         }
         Text(
             text = text,
-            color = if (enabled) Color(0xFFFFF6E3) else Color(0xFF6E5F48),
+            color = if (enabled) contentColor else Color(0xFF6E5F48),
             fontSize = fontSize,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -596,7 +600,7 @@ private fun ShelfBoard(
             .background(Cabinet.wallBottom),
     ) {
         val showPager = pages.size > 1
-        val footerH = if (showPager) 34.dp else 0.dp
+        val footerH = if (showPager) 58.dp else 0.dp
         val rowH = (maxHeight - footerH) / SHELF_PAGE_ROWS
  // 书宽按 3 本紧排算，书高受层高限制（窄屏自动缩书，不裁字）
         val slotW = (maxWidth - (SHELF_POST_W + SHELF_SIDE_INSET) * 2 - SHELF_GAP * 2) / BOOKS_PER_ROW
@@ -646,7 +650,7 @@ private fun ShelfBoard(
                     val filledRows = rows.size
                     repeat(SHELF_PAGE_ROWS) { r ->
                         val sign = when {
-                            entries.isEmpty() && r == 0 -> "书架还是空的" to "下载的内容会陈列在这里"
+                            entries.isEmpty() && r == 0 -> "货架还是空的" to "下载的内容会陈列在这里"
                             r == filledRows && rows.getOrElse(r) { emptyList() }.isEmpty() ->
                                 "空 架" to "下载的内容会摆到这一层"
                             else -> null
@@ -683,7 +687,7 @@ private fun ShelfBoard(
                     ShelfPixelButton(
                         "<", container = Color(0xFFC9731E), enabled = page > 0,
                         onClick = { if (page > 0) page-- },
-                        modifier = Modifier.width(46.dp), fontSize = 12.sp, height = 24.dp,
+                        modifier = Modifier.width(48.dp), fontSize = 12.sp,
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(
@@ -696,7 +700,7 @@ private fun ShelfBoard(
                     ShelfPixelButton(
                         ">", container = Color(0xFFC9731E), enabled = page < pages.size - 1,
                         onClick = { if (page < pages.size - 1) page++ },
-                        modifier = Modifier.width(46.dp), fontSize = 12.sp, height = 24.dp,
+                        modifier = Modifier.width(48.dp), fontSize = 12.sp,
                     )
                 }
             }
