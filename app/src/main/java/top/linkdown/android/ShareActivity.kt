@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.linkdown.android.engine.BatchInfo
+import top.linkdown.android.engine.HttpVideoScopeProbe
 import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.YtdlpEngine
 import top.linkdown.android.pipeline.DownloadModes
@@ -139,6 +140,7 @@ private fun ShareCard(
             initial = DownloadModes(false, false, false),
             enumerate = enumerate,
             probeFor = probeFor,
+            videoScopeProbe = remember { HttpVideoScopeProbe(context.filesDir) },
             onConfirmSingle = { modes, u, _ ->
                 scope.launch {
                     when (val r = queue.enqueue(u, modes, sessdataSnapshot = null)) {

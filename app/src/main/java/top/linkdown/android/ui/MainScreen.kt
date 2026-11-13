@@ -34,12 +34,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.linkdown.android.engine.BatchInfo
+import top.linkdown.android.engine.HttpVideoScopeProbe
 import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.internal.ChildRef
 import top.linkdown.android.pipeline.DownloadModes
@@ -113,6 +115,7 @@ fun MainScreen(
     modifier: Modifier = Modifier,
 ) {
     val c = PixelTheme.colors
+    val context = LocalContext.current // 下单弹窗 B 站范围 probe（filesDir 读 cookie）
     var showOrderDialog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<QueueItem?>(null) }
     val listState = rememberLazyListState()
@@ -206,6 +209,7 @@ fun MainScreen(
             initial = DownloadModes(false, false, false),
             enumerate = enumerateBatch,
             probeFor = probeFor,
+            videoScopeProbe = remember { HttpVideoScopeProbe(context.filesDir) },
             onConfirmSingle = { modes, u, probeTitle ->
                 showOrderDialog = false
                 onUrlChange("")   // 下单即清空（对齐网页版）；下一条链接走剪贴板绿 chip 带入

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,25 +35,38 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import android.widget.Toast
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.linkdown.android.engine.BatchInfo
 import top.linkdown.android.engine.EngineException
+import top.linkdown.android.engine.Mode
 import top.linkdown.android.engine.ProbeInfo
 import top.linkdown.android.engine.internal.ChildRef
+import top.linkdown.android.engine.internal.VideoScope
 import top.linkdown.android.engine.internal.expandShortlink
 import top.linkdown.android.engine.internal.isBatchUrl
 import top.linkdown.android.engine.internal.isShortlinkUrl
+import top.linkdown.android.engine.internal.isVideoUrl
+import top.linkdown.android.engine.internal.ScopeFlowAction
+import top.linkdown.android.engine.internal.scopeChildren
+import top.linkdown.android.engine.internal.scopeFlowNext
 import top.linkdown.android.pipeline.DownloadModes
 import top.linkdown.android.pipeline.EngineKind
 import top.linkdown.android.pipeline.EngineRouter
 import top.linkdown.android.pipeline.ErrorMapper
+import top.linkdown.android.pipeline.PlatformDirs
+import top.linkdown.android.queue.DedupCheck
 import top.linkdown.android.queue.MAX_GROUP_CHILDREN
+import top.linkdown.android.queue.MediaStoreShelfQuery
 import kotlinx.coroutines.launch
 
 /**
@@ -144,6 +159,17 @@ internal sealed interface OrderStage {
     data object Sniffing : OrderStage
     data object Parsing : OrderStage
     data class Confirm(val info: BatchInfo) : OrderStage
+    data class ScopeChoice(
+        val scope: top.linkdown.android.engine.internal.VideoScope,
+        val srcUrl: String,              // startFlow 展开后 target（fix 1：b23.tv 裸短链不得回传）
+    ) : OrderStage
+    data class ScopeList(
+        val info: top.linkdown.android.engine.BatchInfo,
+        val exists: List<Boolean>,       // 与 info.children 对齐（预查判重）
+        val listTitle: String,           // page=视频标题 / season=合集标题
+        val which: String,               // "page" | "season"
+        val srcUrl: String,              // startFlow 展开后 target（同上；回调 url 形参非空来源）
+    ) : OrderStage
     data class MultiParsing(val done: Int, val total: Int) : OrderStage
     data class MultiConfirm(val lines: List<OrderLine>) : OrderStage
     data class Error(val message: String) : OrderStage
@@ -186,12 +212,15 @@ internal fun ModeOrderDialog(
     initial: DownloadModes,
     enumerate: suspend (String) -> BatchInfo,
     probeFor: suspend (String) -> ProbeInfo,
+    videoScopeProbe: top.linkdown.android.engine.VideoScopeProbe =
+        top.linkdown.android.engine.HttpVideoScopeProbe(LocalContext.current.filesDir),
     onConfirmSingle: (modes: DownloadModes, url: String, probeTitle: String?) -> Unit,
     onConfirmBatch: (modes: DownloadModes, url: String, title: String, children: List<ChildRef>) -> Unit,
     onConfirmMulti: (modes: DownloadModes, singles: List<MultiSingleOrder>, groups: List<MultiGroupOrder>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val c = PixelTheme.colors
+    val context = LocalContext.current // B 站范围流：识别失败 Toast + 预查判重 MediaStore 查询
     val single = urls.singleOrNull()   // 单链接路径维持原行为；多链接走 Multi* 阶段
     // 封面恒随单下载（用户拍板 2026-11-08：弹窗不提供封面勾选项）：sel.cover 恒 true，
     // 阅读器音频/视频纸用书内封面页当缩略图；判重对已下载封面自动跳过
@@ -256,6 +285,30 @@ internal fun ModeOrderDialog(
                     url
                 }
             }
+ // cover 模式在本弹窗不可达（封面不提供勾选项，用户拍板 2026-11-08；sel 无 cover 位），
+ // 故无 mode!=COVER 守卫位——若未来 sel 增加 cover 勾选，此处必须先补排除再 probe
+            if (isVideoUrl(target)) {
+                stage = OrderStage.Sniffing        // 「识别内容…」加载态（协程随关闭取消）
+                val res = try {
+                    videoScopeProbe.probe(target)
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (_: Throwable) {
+                    null
+                }
+                when (scopeFlowNext(res)) {        // 纯决策（T7，JVM 已测）
+                    ScopeFlowAction.SINGLE_TOAST -> {
+                        Toast.makeText(context, "合集/分P识别失败，已按单个视频下单",
+                            Toast.LENGTH_SHORT).show()
+                        onConfirmSingle(sel, target, null)
+                    }
+ // gone（SINGLE_PLAIN）不 toast 识别注（spec §7：下载必失败，失败信息经队列
+ // Failed 态呈现、用户必见）——与 web「error 不并入注」同一口径
+                    ScopeFlowAction.SINGLE_PLAIN -> onConfirmSingle(sel, target, null)
+                    ScopeFlowAction.SHOW_CHOICE -> stage = OrderStage.ScopeChoice(res!!.scope!!, target)
+                }
+                return@launch
+            }
             if (!isBatchUrl(target)) {
                 onConfirmSingle(sel, target, null)  // 直连路径未枚举，无预取名
                 return@launch
@@ -274,6 +327,39 @@ internal fun ModeOrderDialog(
             when (val step = nextStepAfterEnumerate(target, info)) {
                 is BatchNextStep.Single -> onConfirmSingle(sel, step.url, info.title)
                 is BatchNextStep.Confirm -> stage = OrderStage.Confirm(step.info)
+            }
+        }
+    }
+
+ // B 站范围流：清单预查（预查键 T7 纯函数已预计算；MediaStore 查询隔离 IO，先给 Parsing 加载态）
+    fun openScopeList(sj: VideoScope, srcUrl: String, listTitle: String, which: String) {
+        stage = OrderStage.Parsing        // 预查加载态（MediaStore 查询离开主线程）
+        scope.launch {
+            try {
+                val (title, kids) = scopeChildren(sj, which)
+                val exists = withContext(Dispatchers.IO) {
+                    val dedup = DedupCheck(MediaStoreShelfQuery(context))
+                    val modes = buildList {
+                        if (sel.video) add(Mode.VIDEO)
+                        if (sel.audio) add(Mode.AUDIO)
+                    }
+ // 平台 token 必须是落库目录名：PlatformDirs.dirFor(url)→「哔哩哔哩」
+ // （YtdlpEngine.kt:71 先例；传 "bilibili" 查空集→灰显恒失效，Review Focus 6）
+                    val platform = PlatformDirs.dirFor(kids.firstOrNull()?.url ?: "")
+                    kids.map { child ->
+                        if (modes.isEmpty()) false
+                        else modes.any { m -> dedup.exists(platform, child.precheckKey, m) }
+                    }
+                }
+                stage = OrderStage.ScopeList(
+                    info = BatchInfo(title = title, children = kids.map { ChildRef(it.url, it.title) },
+                        entriesTotal = kids.size),
+                    exists = exists, listTitle = title, which = which, srcUrl = srcUrl)
+            } catch (ce: CancellationException) {
+                throw ce // 弹窗关闭取消穿透不吞（照同文件 enumerate 路径先例）
+            } catch (t: Throwable) {
+                // MediaStore 查询抛异常（权限运行中被撤等）→ Error 态，防卡 Parsing/崩溃
+                stage = OrderStage.Error("预查失败：${ErrorMapper.humanize(t)}")
             }
         }
     }
@@ -387,6 +473,74 @@ internal fun ModeOrderDialog(
                                     },
                                     modifier = Modifier.weight(1f),
                                 )
+                            }
+                        }
+                        is OrderStage.ScopeChoice -> {
+                            val sj = s.scope
+                            Text("这条链接包含", color = c.textSecondary, fontSize = 13.sp)
+                            Spacer(Modifier.height(9.dp))
+                            if (sj.pages.size > 1) PixelButton(
+                                "全部分P · ${sj.pages.size} 个",
+                                icon = Sprites.CHECK,
+                                onClick = { openScopeList(sj, s.srcUrl, sj.title, "page") },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (sj.episodes.isNotEmpty()) PixelButton(
+                                "整个合集「${sj.seasonTitle ?: ""}」· ${sj.episodes.size} 集" +
+                                    if (sj.truncated) "（不完整 ${sj.episodes.size}/${sj.epCount}）" else "",
+                                icon = Sprites.CHECK,
+                                onClick = {
+                                    openScopeList(sj, s.srcUrl, sj.seasonTitle ?: sj.title, "season")
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(7.dp))
+                            if (sj.truncated) Text(
+                                "⚠ 合集不完整（仅获得 ${sj.episodes.size}/${sj.epCount} 集），可照常下载可见部分",
+                                color = c.error, fontSize = 11.sp,
+                            )
+                            Spacer(Modifier.height(7.dp))
+ // srcUrl=startFlow 展开后 target（非空 String，短链已展开——b23.tv 裸链 yt-dlp 不认必失败，
+ // spec §4「现行为」口径；不用 single 原链接，也无须可空性判断；fix 1）
+                            PixelButton("只下当前视频（点名的那一P）",
+                                style = PixelButtonStyle.NEUTRAL,
+                                onClick = { onConfirmSingle(sel, s.srcUrl, null) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(7.dp))
+                            PixelButton("取 消", style = PixelButtonStyle.NEUTRAL,
+                                onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+                        }
+                        is OrderStage.ScopeList -> {
+                            if (s.info.children.size > MAX_GROUP_CHILDREN) Text(
+                                "共 ${s.info.children.size} 条，将截取前 $MAX_GROUP_CHILDREN",
+                                color = c.error, fontSize = 12.sp)
+                            var picked by remember(s.info) {
+                                mutableStateOf(s.info.children.indices
+                                    .filter { !s.exists[it] }.toSet())
+                            }
+                            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 340.dp)) {
+                                itemsIndexed(s.info.children) { idx, child ->
+                                    PixelCheckRow(child.title, Sprites.NOTE, "mp4", idx in picked) {
+                                        picked = if (idx in picked) picked - idx else picked + idx
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(9.dp))
+                            Text("已选 ${picked.size}/${s.info.children.size}",
+                                color = c.textSecondary, fontSize = 11.sp)
+                            Spacer(Modifier.height(13.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PixelButton("取 消", style = PixelButtonStyle.NEUTRAL,
+                                    onClick = onDismiss, modifier = Modifier.weight(1f))
+                                PixelButton("开 始 (${picked.size})", enabled = picked.isNotEmpty(),
+                                    icon = Sprites.CHECK,
+                                    onClick = {
+ // srcUrl=startFlow 展开后 target（父 URL 非空、短链已展开，fix 1；无须 single 可空性判断）
+                                        onConfirmBatch(sel, s.srcUrl, s.listTitle,
+                                            s.info.children.filterIndexed { i, _ -> i in picked })
+                                    },
+                                    modifier = Modifier.weight(1f))
                             }
                         }
                         is OrderStage.MultiParsing -> {

@@ -54,6 +54,7 @@ Media library:
 Batch:
 
 - Collection-style links (Bilibili series, UP-loader lists, anime seasons): enumerate first, confirm "title · N items", then download as one order
+- Paste a single link to a multi-part video or any episode inside a collection, and Linkdown detects it automatically, asking what to download: just this video / all parts / the whole collection
 - Parent/child aggregation: one card per collection with live progress
 
 Engine:
