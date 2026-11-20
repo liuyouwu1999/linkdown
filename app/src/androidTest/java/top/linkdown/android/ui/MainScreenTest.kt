@@ -246,15 +246,18 @@ class MainScreenTest {
         rule.runOnIdle { assertTrue("登录入口应触发 openLoginHub", hubOpened) }
     }
 
-    @Test fun login_entry_sits_between_order_button_and_shipment_panel() {
- // v2 重排回归：中部滚动区(后厨/今日出货/日志)在上，底部固定块=去登录→设置→输入卡→下单
+    @Test fun order_input_first_login_settings_row_bottom() {
+ // 输入优先重排回归：中部滚动区=输入卡(下单贴输入框)→后厨→今日出货→日志；底部固定块=去登录|设置 一行两颗半宽
         set(url = "https://x.com/a/1")
         val orderY = rule.onNodeWithText("下 单！").fetchSemanticsNode().positionInRoot.y
         val loginY = rule.onNodeWithText("去 登 录").fetchSemanticsNode().positionInRoot.y
+        val settingsY = rule.onNodeWithText("设 置").fetchSemanticsNode().positionInRoot.y
         val shipmentY = rule.onNodeWithText("今日出货 0 件").fetchSemanticsNode().positionInRoot.y
         rule.runOnIdle {
-            assertTrue("登录入口应在「下 单！」之上", loginY < orderY)
-            assertTrue("今日出货面板应在登录入口之上", shipmentY < loginY)
+            assertTrue("输入卡（下单）应置顶于今日出货之上", orderY < shipmentY)
+            assertTrue("登录入口应在输入卡（下单）之下（吸底固定块）", loginY > orderY)
+            assertTrue("设置应与登录同一行", kotlin.math.abs(settingsY - loginY) < 40f)
+            assertTrue("今日出货面板应在登录行之上", shipmentY < loginY)
         }
     }
 

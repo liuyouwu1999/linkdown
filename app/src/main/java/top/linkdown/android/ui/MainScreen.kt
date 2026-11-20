@@ -130,7 +130,26 @@ fun MainScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
         ) {
- // ── 后厨（队列卡，吸底重排后移入中部滚动区首位）──
+ // ── 面板一：交给我想要的链接（输入优先置顶：贴链接=第一动作，开屏第一眼可见；下单贴输入框不断链）──
+            PixelPanel {
+                PixelPanelLabel(Sprites.BOX, "交给我想要的链接：")
+                PixelTextField(state.url, onUrlChange, "粘贴视频链接…", testTag = "urlField")
+                state.clipboardUrl?.let {
+                    Spacer(Modifier.height(8.dp))
+                    PixelChip(
+                        "剪贴板有一条 · 点此带入",
+                        bg = c.success,
+                        contentColor = c.onDarkBrown,
+                        icon = Sprites.CLIPBOARD,
+                        onClick = onImportClipboard,
+                    )
+                }
+                Spacer(Modifier.height(11.dp))
+ // ── 主按钮：下单（输入优先重排：移入输入卡内，紧贴输入框）──
+                PixelButton("下 单！", enabled = isValidInput(state), onClick = { showOrderDialog = true })
+            }
+            Spacer(Modifier.height(11.dp))
+ // ── 后厨（队列卡）──
             val queueCards = queue.items.filter { it.parentGroupId == null && it.state in queueVisibleStates }
             if (queueCards.isNotEmpty()) {
                 QueueArea(queue, queueCards, onCancel, onRetry, onDelete = { pendingDelete = it },
@@ -159,43 +178,33 @@ fun MainScreen(
                 LogArea(state.logLines, listState)
             }
         }
- // ── 底部固定块（不滚动；insets 全由根级 safeDrawingPadding 承担，勿叠加 navigationBars/imePadding）──
+ // ── 底部固定块（不滚动；insets 全由根级 safeDrawingPadding 承担，勿叠加 navigationBars/imePadding）：
+ // 输入置顶后登录/设置降级为次级入口，收纳一行两颗半宽，不再与输入卡抢视线 ──
         Column(Modifier.padding(horizontal = 14.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
  // ── 登录入口（用户拍板：只留去登录+一行说明）──
-            PixelButton(
-                "去 登 录",
-                style = PixelButtonStyle.SUCCESS,
-                icon = Sprites.KEY,
-                fontSize = 16.sp,
-                onClick = onOpenLoginHub,
-            )
+                PixelButton(
+                    "去 登 录",
+                    style = PixelButtonStyle.SUCCESS,
+                    icon = Sprites.KEY,
+                    fontSize = 16.sp,
+                    onClick = onOpenLoginHub,
+                    modifier = Modifier.weight(1f),
+                )
+ // ── 设置入口 ──
+                PixelButton(
+                    "设 置",
+                    fontSize = 16.sp,
+                    icon = Sprites.SETTINGS,
+                    onClick = onOpenSettings,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             Text(
                 "登录后可下载需要账号的内容（B站、网易云等），不登录也能下大多数",
                 color = c.textSecondary, fontSize = 11.sp,
                 modifier = Modifier.padding(top = 5.dp, start = 4.dp),
             )
-            Spacer(Modifier.height(13.dp))
- // ── 设置入口 ──
-            PixelButton("设 置", fontSize = 16.sp, icon = Sprites.SETTINGS, onClick = onOpenSettings)
-            Spacer(Modifier.height(13.dp))
- // ── 面板一：交给我想要的链接 ──
-            PixelPanel {
-                PixelPanelLabel(Sprites.BOX, "交给我想要的链接：")
-                PixelTextField(state.url, onUrlChange, "粘贴视频链接…", testTag = "urlField")
-                state.clipboardUrl?.let {
-                    Spacer(Modifier.height(8.dp))
-                    PixelChip(
-                        "剪贴板有一条 · 点此带入",
-                        bg = c.success,
-                        contentColor = c.onDarkBrown,
-                        icon = Sprites.CLIPBOARD,
-                        onClick = onImportClipboard,
-                    )
-                }
-            }
-            Spacer(Modifier.height(11.dp))
- // ── 主按钮：下单（吸底=拇指自然区，spec §4）──
-            PixelButton("下 单！", enabled = isValidInput(state), onClick = { showOrderDialog = true })
             Spacer(Modifier.height(8.dp))
         }
     }
